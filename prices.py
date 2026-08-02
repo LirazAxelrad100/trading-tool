@@ -83,6 +83,14 @@ def fetch_industry(ticker: str) -> Optional[str]:
     return (data or {}).get("finnhubIndustry")
 
 
+def fetch_price_returns(ticker: str) -> dict:
+    """Pre-computed trailing price returns (percent) from Finnhub's free metrics —
+    5-day (~1 week) and 13-week (~3 months). One call, no daily-price history needed."""
+    data = _finnhub_get("stock/metric", {"symbol": ticker, "metric": "all"})
+    m = (data or {}).get("metric", {})
+    return {"move_1w": m.get("5DayPriceReturnDaily"), "move_3m": m.get("13WeekPriceReturnDaily")}
+
+
 def fetch_recommendation_history(ticker: str, limit: int = 4) -> list:
     """Raw recommendation counts for the most recent `limit` monthly periods
     (newest first) — Finnhub returns several periods in one call, which is what

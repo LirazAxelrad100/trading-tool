@@ -141,6 +141,8 @@
             <th class="sortable" onclick="oppBSortBy('conviction')">Conviction <span id="oppb-arrow-conviction" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>How strongly analysts lean buy.</strong> (2×StrongBuy + Buy) ÷ (2×analysts) — strong-buys count double, holds/sells count 0. All strong-buy = 1,0; all plain buy = 0,5. Example (AMT): (2×7 + 16) ÷ (2×29) = 0,52.</span></span></th>
             <th>Beats <span class="info" tabindex="0"><span class="tooltip"><strong>Earnings-beat consistency.</strong> Share of the last 4 quarters where actual earnings beat the estimate. 4/4 = 1,0. A stock with no earnings coverage defaults to 0,5 (neutral).</span></span></th>
             <th class="sortable" onclick="oppBSortBy('drift')">Drift <span id="oppb-arrow-drift" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>Which way analyst opinion is moving,</strong> over the ~4 months Finnhub returns. ▲ improving → toward 1,0; flat = 0,5; ▼ cooling → toward 0. A light 10% tiebreaker, not a main driver.</span></span></th>
+            <th class="sortable" onclick="oppBSortBy('move_1w')">1W % <span id="oppb-arrow-move_1w" class="arrow"></span></th>
+            <th class="sortable" onclick="oppBSortBy('move_3m')">3M % <span id="oppb-arrow-move_3m" class="arrow"></span></th>
             <th>Also Zacks 1</th>
             <th></th>
           </tr>
