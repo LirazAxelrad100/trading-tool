@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Trading Tool — Holdings & Trailing Stops</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <h1>Holdings & Trailing Stops</h1>
+  <p class="subtitle">Manual trailing-stop tracker — checks run on demand, actual downside protection is your broker's live stop order.</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-btn-stocks" onclick="showTab('stocks')">My Stocks</button>
+    <button class="tab-btn" id="tab-btn-opportunities" onclick="showTab('opportunities')">Opportunities</button>
+    <button class="tab-btn" id="tab-btn-opportunities-b" onclick="showTab('opportunities-b')">Opportunities B</button>
+    <button class="tab-btn" id="tab-btn-history" onclick="showTab('history')">History</button>
+  </div>
+
+  <div id="tab-stocks" class="tab-content">
+
+    <div class="panel">
+      <h2>Add holding</h2>
+      <div class="add-form">
+        <div><label>Ticker</label><input id="f-ticker" placeholder="AAPL" /></div>
+        <div><label>Shares</label><input id="f-shares" type="text" inputmode="decimal" /></div>
+        <div><label>Buy in / share</label><input id="f-cost" type="text" inputmode="decimal" /></div>
+        <div><label>Purchase date</label><input id="f-date" type="date" /></div>
+        <div><label>Stop loss</label><input id="f-stop" type="text" inputmode="decimal" /></div>
+        <div><label>Trailing high (optional)</label><input id="f-ref" type="text" inputmode="decimal" placeholder="defaults to buy in" /></div>
+        <div>
+          <label>Exit plan</label>
+          <select id="f-exit-plan">
+            <option value="hold">Hold / reassess</option>
+            <option value="sell_gains_only">Sell gains only</option>
+            <option value="sell_all">Sell all</option>
+          </select>
+        </div>
+        <button onclick="addHolding()">Add</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Holdings</h2>
+        <button id="refresh-all-btn" onclick="refreshAllPrices()">Refresh all prices</button>
+      </div>
+      <div class="table-scroll">
+      <table id="holdings-table">
+        <thead>
+          <tr>
+            <th class="sortable" onclick="sortBy('ticker')">Ticker <span id="arrow-ticker" class="arrow"></span></th>
+            <th class="sortable" onclick="sortBy('shares')">Shares <span id="arrow-shares" class="arrow"></span></th>
+            <th>Buy in</th>
+            <th class="sortable" onclick="sortBy('purchase_date')">Purchase date <span id="arrow-purchase_date" class="arrow"></span></th>
+            <th>Stop loss</th>
+            <th>Trailing high</th>
+            <th>Trailing %</th>
+            <th>Current price</th>
+            <th class="sortable" onclick="sortBy('day_change_pct')">Today % <span id="arrow-day_change_pct" class="arrow"></span></th>
+            <th class="sortable" onclick="sortBy('total')">Total <span id="arrow-total" class="arrow"></span></th>
+            <th class="sortable" onclick="sortBy('portfolio_pct')">% Portfolio <span id="arrow-portfolio_pct" class="arrow"></span></th>
+            <th>Zacks Rank</th>
+            <th>Exit plan</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="holdings-body"></tbody>
+      </table>
+      </div>
+      <p id="empty-msg" class="empty" style="display:none;">No holdings yet — add one above.</p>
+      <p class="total-line">Total value of assets: <strong id="grand-total">0.00</strong></p>
+    </div>
+
+    <div id="flags"></div>
+
+  </div>
+
+  <div id="tab-opportunities" class="tab-content" style="display:none">
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Opportunities — Zacks Rank 1</h2>
+        <div>
+          <span id="zacks-status" class="subtitle" style="margin-right: 0.75rem;"></span>
+          <input type="file" id="zacks-file-input" accept=".csv" style="display:none" onchange="uploadZacksFile(this.files[0])" />
+          <button id="zacks-import-btn" class="secondary" onclick="document.getElementById('zacks-file-input').click()">Import Zacks CSV</button>
+          <button id="opp-consensus-btn" class="secondary" onclick="refreshOppConsensus()">Refresh consensus (~4 min)</button>
+        </div>
+      </div>
+      <p class="subtitle">Sorted, not ranked by me — pick the lens that matters to you and decide. No pick is asserted.</p>
+      <div class="table-scroll">
+      <table id="opportunities-table">
+        <thead>
+          <tr>
+            <th class="sortable" onclick="oppSortBy('ticker')">Ticker <span id="opp-arrow-ticker" class="arrow"></span></th>
+            <th class="sortable" onclick="oppSortBy('company')">Company <span id="opp-arrow-company" class="arrow"></span></th>
+            <th>Industry</th>
+            <th class="sortable" onclick="oppSortBy('price')">Price <span id="opp-arrow-price" class="arrow"></span></th>
+            <th class="sortable" onclick="oppSortBy('price_move_1w')">1W % <span id="opp-arrow-price_move_1w" class="arrow"></span></th>
+            <th class="sortable" onclick="oppSortBy('price_move_4w')">4W % <span id="opp-arrow-price_move_4w" class="arrow"></span></th>
+            <th class="sortable" onclick="oppSortBy('eps_est_change_4w')">EPS Est Δ (4W) <span id="opp-arrow-eps_est_change_4w" class="arrow"></span></th>
+            <th>VGM</th>
+            <th class="sortable" onclick="oppSortBy('consensus_avg')">Consensus <span id="opp-arrow-consensus_avg" class="arrow"></span></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="opportunities-body"></tbody>
+      </table>
+      </div>
+      <p id="opp-empty-msg" class="empty" style="display:none;">No Rank 1 data yet — import a Zacks CSV above.</p>
+      <div class="compare-bar">
+        <input type="text" id="compare-a" placeholder="Ticker A" style="width:100px" />
+        <span class="subtitle">vs</span>
+        <input type="text" id="compare-b" placeholder="Ticker B" style="width:100px" />
+        <button class="secondary" onclick="compareTickers()">Compare</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="tab-opportunities-b" class="tab-content" style="display:none">
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Opportunities B — analyst-conviction shortlist (S&amp;P 500)</h2>
+        <div>
+          <span id="oppb-status" class="subtitle" style="margin-right: 0.75rem;"></span>
+          <button id="sectors-refresh-btn" class="secondary" onclick="refreshSectors()">Refresh sectors (~2.5 min)</button>
+          <button id="oppb-refresh-btn" class="secondary" onclick="refreshOpportunitiesB()">Refresh (~10 min)</button>
+        </div>
+      </div>
+      <p class="subtitle">A deliberately short, second source — different method from Zacks. Score = 45% analyst conviction + 45% earnings-beat consistency + 10% opinion drift. Sorted, not ranked as advice; no pick is asserted.</p>
+      <div class="table-scroll">
+      <table id="opportunities-b-table">
+        <thead>
+          <tr>
+            <th class="sortable" onclick="oppBSortBy('ticker')">Ticker <span id="oppb-arrow-ticker" class="arrow"></span></th>
+            <th class="sortable" onclick="oppBSortBy('company')">Company <span id="oppb-arrow-company" class="arrow"></span></th>
+            <th>Sector</th>
+            <th class="sortable" onclick="oppBSortBy('composite')">Score <span id="oppb-arrow-composite" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>0–100 overall score</strong> = 45% Conviction + 45% Beats + 10% Drift, ×100. Example (AMT): 0,45×0,52 + 0,45×1,00 + 0,10×0,74 = 0,76 → 76. It's relative, not a probability — it orders your attention, it's not a verdict.</span></span></th>
+            <th class="sortable" onclick="oppBSortBy('conviction')">Conviction <span id="oppb-arrow-conviction" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>How strongly analysts lean buy.</strong> (2×StrongBuy + Buy) ÷ (2×analysts) — strong-buys count double, holds/sells count 0. All strong-buy = 1,0; all plain buy = 0,5. Example (AMT): (2×7 + 16) ÷ (2×29) = 0,52.</span></span></th>
+            <th>Beats <span class="info" tabindex="0"><span class="tooltip"><strong>Earnings-beat consistency.</strong> Share of the last 4 quarters where actual earnings beat the estimate. 4/4 = 1,0. A stock with no earnings coverage defaults to 0,5 (neutral).</span></span></th>
+            <th class="sortable" onclick="oppBSortBy('drift')">Drift <span id="oppb-arrow-drift" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>Which way analyst opinion is moving,</strong> over the ~4 months Finnhub returns. ▲ improving → toward 1,0; flat = 0,5; ▼ cooling → toward 0. A light 10% tiebreaker, not a main driver.</span></span></th>
+            <th>Also Zacks 1</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="opportunities-b-body"></tbody>
+      </table>
+      </div>
+      <p id="oppb-empty-msg" class="empty" style="display:none;">Not generated yet — click Refresh (takes ~10 minutes, one analyst-rating call per S&amp;P 500 name).</p>
+      <div class="compare-bar">
+        <input type="text" id="oppb-compare-a" placeholder="Ticker A" style="width:100px" />
+        <span class="subtitle">vs</span>
+        <input type="text" id="oppb-compare-b" placeholder="Ticker B" style="width:100px" />
+        <button class="secondary" onclick="compareTickers('oppb-compare-a', 'oppb-compare-b')">Compare</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="tab-history" class="tab-content" style="display:none">
+
+    <div class="panel">
+      <h2>Sales history</h2>
+      <div class="table-scroll">
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Shares sold</th>
+            <th>Buy in</th>
+            <th>Total spend</th>
+            <th>Sale price</th>
+            <th>Total received</th>
+            <th>Realized gain/loss</th>
+            <th>Est. tax</th>
+            <th>Sell date/time</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+      </div>
+      <p id="history-empty-msg" class="empty" style="display:none;">No sales recorded yet.</p>
+    </div>
+
+  </div>
+
+  <div id="lots-modal" class="modal-overlay" onclick="if(event.target===this) closeLotsModal()">
+    <div class="modal-box modal-box-wide">
+      <div class="modal-header">
+        <h2 id="lots-modal-title"></h2>
+        <button class="secondary" onclick="closeLotsModal()">Close</button>
+      </div>
+      <div id="lots-modal-body"></div>
+      <h3 style="margin:1rem 0 0.4rem; font-size:0.95rem;">Add a purchase (lot)</h3>
+      <div class="add-form">
+        <div><label>Shares bought</label><input id="lot-shares" type="text" inputmode="decimal" /></div>
+        <div><label>Buy in / share (EUR)</label><input id="lot-cost" type="text" inputmode="decimal" /></div>
+        <div><label>Purchase date</label><input id="lot-date" type="date" /></div>
+        <button onclick="submitAddLot()">Add purchase</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sell-modal" class="modal-overlay" onclick="if(event.target===this) closeSellModal()">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="sell-modal-title"></h2>
+        <button class="secondary" onclick="closeSellModal()">Close</button>
+      </div>
+      <div class="add-form">
+        <div><label>Shares sold</label><input id="sell-shares" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+        <div><label>Total sum received (EUR)</label><input id="sell-total" type="text" inputmode="decimal" oninput="updateSellPreview()" placeholder="e.g. 3.155,00 or 3155" /></div>
+        <div id="sell-ref-price" class="subtitle"></div>
+        <div id="sell-preview" class="subtitle"></div>
+        <div><label>Sell date</label><input id="sell-date" type="date" /></div>
+        <div><label>Sell time</label><input id="sell-time" type="time" /></div>
+        <button onclick="submitSell()">Confirm sell</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="consensus-modal" class="modal-overlay" onclick="if(event.target===this) closeConsensusModal()">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="consensus-modal-title"></h2>
+        <button class="secondary" onclick="closeConsensusModal()">Close</button>
+      </div>
+      <div id="consensus-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="analysis-modal" class="modal-overlay" onclick="if(event.target===this) closeAnalysisModal()">
+    <div class="modal-box modal-box-wide">
+      <div class="modal-header">
+        <h2 id="analysis-modal-title"></h2>
+        <button class="secondary" onclick="closeAnalysisModal()">Close</button>
+      </div>
+      <div id="analysis-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="compare-modal" class="modal-overlay" onclick="if(event.target===this) closeCompareModal()">
+    <div class="modal-box modal-box-compare">
+      <div class="modal-header">
+        <h2>Compare</h2>
+        <button class="secondary" onclick="closeCompareModal()">Close</button>
+      </div>
+      <div id="compare-modal-body" class="compare-columns"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
