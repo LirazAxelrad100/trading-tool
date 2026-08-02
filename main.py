@@ -1,0 +1,677 @@
+import json
+import shutil
+import tempfile
+import time
+import uuid
+from pathlib import Path
+from typing import Literal, Optional
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+import alpha_vantage
+import opportunities_b
+import prices
+import sectors
+import synthesis
+import zacks_import
+from alpha_vantage import AlphaVantageError
+from prices import PriceError
+
+DATA_FILE = Path(__file__).parent / "data" / "holdings.json"
+SALES_HISTORY_FILE = Path(__file__).parent / "data" / "sales_history.json"
+STATIC_DIR = Path(__file__).parent / "static"
+DOWNLOADS_DIR = Path.home() / "Downloads"
+
+app = FastAPI(title="Trading Tool")
+
+ExitPlan = Literal["sell_all", "sell_gains_only", "hold"]
+EXIT_PLAN_LABELS = {
+    "sell_all": "Sell all",
+    "sell_gains_only": "Sell gains only",
+    "hold": "Hold / reassess",
+}
+CAPITAL_GAINS_TAX_RATE = 0.26375
+CONSENSUS_WEIGHTS = {"strong_buy": 1, "buy": 2, "hold": 3, "sell": 4, "strong_sell": 5}
+
+
+def load_holdings() -> list[dict]:
+    holdings = json.loads(DATA_FILE.read_text())
+    migrated = False
+    for h in holdings:
+        if "current_price" not in h:
+            h["current_price"] = h["reference_high"]
+            migrated = True
+        if "exit_plan" not in h:
+            h["exit_plan"] = "hold"
+            migrated = True
+        if "previous_price" not in h:
+            h["previous_price"] = h["current_price"]
+            migrated = True
+        if "consensus" not in h:
+            h["consensus"] = None
+            h["consensus_avg"] = None
+            h["previous_consensus_avg"] = None
+            migrated = True
+        if "day_open_price" in h:
+            del h["day_open_price"]
+            del h["day_open_date"]
+            migrated = True
+        if "day_change_pct" not in h:
+            h["day_change_pct"] = None
+            migrated = True
+        if "manual_price" not in h:
+            h["manual_price"] = False
+            migrated = True
+        if "lots" not in h:
+            # Multi-lot migration: the old single cost basis becomes one lot.
+            h["lots"] = [{
+                "shares": h["shares"],
+                "cost_basis": h["cost_basis"],
+                "purchase_date": h["purchase_date"],
+            }]
+            migrated = True
+    for h in holdings:
+        recompute_aggregates(h)  # keep derived shares/cost_basis/purchase_date in sync with lots
+    if migrated:
+        save_holdings(holdings)
+    return holdings
+
+
+def recompute_aggregates(holding: dict) -> None:
+    """Derive the position-level shares / weighted-average cost_basis / earliest
+    purchase_date from the lots, so all existing code and UI keep reading those
+    fields unchanged. Lots are the source of truth."""
+    lots = holding.get("lots") or []
+    total_shares = sum(lot["shares"] for lot in lots)
+    holding["shares"] = total_shares
+    if total_shares > 0:
+        holding["cost_basis"] = sum(lot["shares"] * lot["cost_basis"] for lot in lots) / total_shares
+        holding["purchase_date"] = min(lot["purchase_date"] for lot in lots)
+
+
+def save_holdings(holdings: list[dict]) -> None:
+    DATA_FILE.write_text(json.dumps(holdings, indent=2))
+
+
+def load_sales_history() -> list[dict]:
+    if not SALES_HISTORY_FILE.exists():
+        return []
+    return json.loads(SALES_HISTORY_FILE.read_text())
+
+
+def save_sales_history(entries: list[dict]) -> None:
+    SALES_HISTORY_FILE.write_text(json.dumps(entries, indent=2))
+
+
+class HoldingIn(BaseModel):
+    ticker: str
+    shares: float
+    cost_basis: float
+    purchase_date: str
+    stop_price: float
+    reference_high: Optional[float] = None
+    trailing_pct: Optional[float] = None
+    current_price: Optional[float] = None
+    exit_plan: ExitPlan = "hold"
+
+
+class HoldingUpdate(BaseModel):
+    ticker: Optional[str] = None
+    shares: Optional[float] = None
+    cost_basis: Optional[float] = None
+    purchase_date: Optional[str] = None
+    stop_price: Optional[float] = None
+    reference_high: Optional[float] = None
+    current_price: Optional[float] = None
+    exit_plan: Optional[ExitPlan] = None
+    manual_price: Optional[bool] = None
+
+
+class LotIn(BaseModel):
+    shares: float
+    cost_basis: float
+    purchase_date: str
+
+
+class LotUpdate(BaseModel):
+    shares: float
+    cost_basis: float
+    purchase_date: str
+
+
+class ConfirmRequest(BaseModel):
+    new_reference_high: float
+    new_stop_price: float
+
+
+class SellRequest(BaseModel):
+    shares_sold: float
+    total_sum: float
+    sell_date: str
+    sell_time: Optional[str] = None
+    override_price_check: bool = False
+
+
+TRIGGER_THRESHOLD = 0.10
+# A recorded sale price this many times off the holding's last known price is
+# almost certainly a mistyped total (the comma/period trap that bit INTC and STX),
+# not a real trade — no stock moves an order of magnitude between refresh and sale.
+SALE_PRICE_SANITY_FACTOR = 10
+# A fetched price this many times off the holding's stored price almost always
+# means the ticker resolves to a different instrument than the user actually holds
+# (e.g. LNVGY = a US ADR bundling 20 Trade-Republic ordinary shares). Rather than
+# clobber the user's price, refresh flags it so they can switch to a manual price.
+PRICE_MISMATCH_FACTOR = 10
+
+
+def find_holding(holdings: list[dict], holding_id: str) -> dict:
+    for h in holdings:
+        if h["id"] == holding_id:
+            return h
+    raise HTTPException(status_code=404, detail="Holding not found")
+
+
+@app.get("/api/holdings")
+def list_holdings():
+    return load_holdings()
+
+
+@app.post("/api/holdings")
+def create_holding(holding: HoldingIn):
+    holdings = load_holdings()
+    reference_high = holding.reference_high if holding.reference_high is not None else holding.cost_basis
+    if holding.trailing_pct is not None:
+        trailing_pct = holding.trailing_pct
+    else:
+        trailing_pct = (reference_high - holding.stop_price) / reference_high
+
+    new_holding = {
+        "id": str(uuid.uuid4()),
+        "ticker": holding.ticker.upper(),
+        "lots": [{
+            "shares": holding.shares,
+            "cost_basis": holding.cost_basis,
+            "purchase_date": holding.purchase_date,
+        }],
+        "stop_price": holding.stop_price,
+        "reference_high": reference_high,
+        "trailing_pct": trailing_pct,
+        "current_price": holding.current_price if holding.current_price is not None else reference_high,
+        "previous_price": holding.current_price if holding.current_price is not None else reference_high,
+        "exit_plan": holding.exit_plan,
+        "consensus": None,
+        "consensus_avg": None,
+        "previous_consensus_avg": None,
+        "day_change_pct": None,
+        "manual_price": False,
+    }
+    recompute_aggregates(new_holding)
+    holdings.append(new_holding)
+    save_holdings(holdings)
+    return new_holding
+
+
+@app.post("/api/holdings/{holding_id}/lots")
+def add_lot(holding_id: str, lot: LotIn):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+    if lot.shares <= 0 or lot.cost_basis < 0:
+        raise HTTPException(status_code=422, detail="Shares must be > 0 and cost basis >= 0.")
+    holding.setdefault("lots", []).append({
+        "shares": lot.shares,
+        "cost_basis": lot.cost_basis,
+        "purchase_date": lot.purchase_date,
+    })
+    recompute_aggregates(holding)
+    save_holdings(holdings)
+    return holding
+
+
+@app.put("/api/holdings/{holding_id}/lots/{lot_index}")
+def update_lot(holding_id: str, lot_index: int, lot: LotUpdate):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+    lots = holding.get("lots") or []
+    if lot_index < 0 or lot_index >= len(lots):
+        raise HTTPException(status_code=404, detail="Lot not found")
+    if lot.shares <= 0 or lot.cost_basis < 0:
+        raise HTTPException(status_code=422, detail="Shares must be > 0 and cost basis >= 0.")
+    lots[lot_index] = {"shares": lot.shares, "cost_basis": lot.cost_basis, "purchase_date": lot.purchase_date}
+    recompute_aggregates(holding)
+    save_holdings(holdings)
+    return holding
+
+
+@app.delete("/api/holdings/{holding_id}/lots/{lot_index}")
+def delete_lot(holding_id: str, lot_index: int):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+    lots = holding.get("lots") or []
+    if lot_index < 0 or lot_index >= len(lots):
+        raise HTTPException(status_code=404, detail="Lot not found")
+    if len(lots) == 1:
+        raise HTTPException(status_code=422, detail="Can't remove the last lot — sell the holding instead.")
+    lots.pop(lot_index)
+    recompute_aggregates(holding)
+    save_holdings(holdings)
+    return holding
+
+
+@app.put("/api/holdings/{holding_id}")
+def update_holding(holding_id: str, update: HoldingUpdate):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+    changes = update.model_dump(exclude_unset=True)
+
+    # shares/cost_basis/purchase_date are derived from lots. For a single-lot holding
+    # we forward an edit of them onto that one lot (keeps the plain Edit form working);
+    # for a multi-lot holding they're ignored here — the per-lot editor handles those.
+    lot_fields = {k: changes.pop(k) for k in ("shares", "cost_basis", "purchase_date") if k in changes}
+    lots = holding.get("lots") or []
+    if lot_fields and len(lots) == 1:
+        lots[0].update(lot_fields)
+
+    for key, value in changes.items():
+        holding[key] = value
+
+    recompute_aggregates(holding)
+    holding["trailing_pct"] = (holding["reference_high"] - holding["stop_price"]) / holding["reference_high"]
+    save_holdings(holdings)
+    return holding
+
+
+@app.post("/api/holdings/{holding_id}/sell")
+def sell_holding(holding_id: str, sell: SellRequest):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+
+    if sell.shares_sold <= 0 or sell.shares_sold > holding["shares"] + 1e-9:
+        raise HTTPException(
+            status_code=422,
+            detail="Shares sold must be greater than 0 and cannot exceed the holding's shares.",
+        )
+
+    sale_price = sell.total_sum / sell.shares_sold
+
+    ref_price = holding.get("current_price")
+    if not sell.override_price_check and ref_price and (
+        sale_price > ref_price * SALE_PRICE_SANITY_FACTOR
+        or sale_price < ref_price / SALE_PRICE_SANITY_FACTOR
+    ):
+        # Confirmable, not a hard block — the frontend turns this into a "record anyway?"
+        # prompt and resubmits with override_price_check=True. Raw numbers only; the
+        # frontend formats them (EU) into the message.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "price_sanity",
+                "ticker": holding["ticker"],
+                "sale_price": sale_price,
+                "ref_price": ref_price,
+                "factor": SALE_PRICE_SANITY_FACTOR,
+            },
+        )
+
+    # FIFO: consume the oldest lots first (German capital-gains basis). total_spend is
+    # the actual cost of the specific shares sold, so realized gain matches the broker.
+    lots = sorted(holding.get("lots") or [], key=lambda lot: lot["purchase_date"])
+    remaining = sell.shares_sold
+    total_spend = 0.0
+    lots_sold = []
+    kept = []
+    for lot in lots:
+        if remaining <= 1e-9:
+            kept.append(lot)
+            continue
+        take = min(lot["shares"], remaining)
+        total_spend += take * lot["cost_basis"]
+        lots_sold.append({"shares": take, "cost_basis": lot["cost_basis"], "purchase_date": lot["purchase_date"]})
+        remaining -= take
+        leftover = lot["shares"] - take
+        if leftover > 1e-9:
+            kept.append({**lot, "shares": leftover})
+    holding["lots"] = kept
+
+    realized_gain = sell.total_sum - total_spend
+    estimated_tax = max(0, realized_gain) * CAPITAL_GAINS_TAX_RATE
+    effective_cost = total_spend / sell.shares_sold if sell.shares_sold else 0
+    remaining_shares = sum(lot["shares"] for lot in kept)
+    sell_datetime = f"{sell.sell_date}T{sell.sell_time}" if sell.sell_time else sell.sell_date
+
+    entry = {
+        "id": str(uuid.uuid4()),
+        "ticker": holding["ticker"],
+        "shares_sold": sell.shares_sold,
+        "sale_price": sale_price,
+        "total_sum": sell.total_sum,
+        "cost_basis": effective_cost,  # FIFO-effective avg of the shares actually sold
+        "total_spend": total_spend,
+        "realized_gain": realized_gain,
+        "estimated_tax": estimated_tax,
+        "sell_datetime": sell_datetime,
+        "purchase_date": lots_sold[0]["purchase_date"] if lots_sold else holding["purchase_date"],
+        "lots_sold": lots_sold,  # per-lot FIFO breakdown
+        "remaining_shares": remaining_shares,
+    }
+
+    entries = load_sales_history()
+    entries.append(entry)
+    save_sales_history(entries)
+
+    if remaining_shares <= 1e-9:
+        holdings = [h for h in holdings if h["id"] != holding_id]
+    else:
+        recompute_aggregates(holding)
+
+    save_holdings(holdings)
+    return entry
+
+
+@app.get("/api/sales-history")
+def list_sales_history():
+    return sorted(load_sales_history(), key=lambda e: e["sell_datetime"], reverse=True)
+
+
+@app.delete("/api/sales-history/{entry_id}")
+def delete_sales_entry(entry_id: str):
+    entries = load_sales_history()
+    entries = [e for e in entries if e["id"] != entry_id]
+    save_sales_history(entries)
+    return {"ok": True}
+
+
+def evaluate_trailing(holding: dict, current_price: float) -> dict:
+    reference_high = holding["reference_high"]
+    stop_price = holding["stop_price"]
+
+    stop_hit = current_price <= stop_price
+    total_gain = (stop_price - holding["cost_basis"]) * holding["shares"]
+    estimated_tax = max(0, total_gain) * CAPITAL_GAINS_TAX_RATE
+
+    pct_move = (current_price - reference_high) / reference_high
+    triggered = pct_move >= TRIGGER_THRESHOLD
+    pct_above_stop = (current_price - stop_price) / stop_price
+
+    result = {
+        "id": holding["id"],
+        "ticker": holding["ticker"],
+        "stop_hit": stop_hit,
+        "total_gain": total_gain,
+        "estimated_tax": estimated_tax,
+        "exit_plan": holding["exit_plan"],
+        "exit_plan_label": EXIT_PLAN_LABELS[holding["exit_plan"]],
+        "triggered": triggered,
+        "old_high": reference_high,
+        "new_price": current_price,
+        "pct_move": pct_move,
+        "pct_above_stop": pct_above_stop,
+        "day_change_pct": holding.get("day_change_pct"),
+        "current_stop": stop_price,
+        "suggested_new_stop": None,
+        "analyst_consensus": None,
+    }
+    if triggered:
+        result["suggested_new_stop"] = current_price * (1 - holding["trailing_pct"])
+    result["analyst_consensus"] = holding.get("consensus")
+    return result
+
+
+def update_price(holding: dict, new_price: float) -> None:
+    if new_price != holding["current_price"]:
+        holding["previous_price"] = holding["current_price"]
+    holding["current_price"] = new_price
+
+
+
+
+def compute_consensus_average(consensus: dict) -> Optional[float]:
+    total = sum(consensus[key] for key in CONSENSUS_WEIGHTS)
+    if total == 0:
+        return None
+    weighted = sum(consensus[key] * weight for key, weight in CONSENSUS_WEIGHTS.items())
+    return weighted / total
+
+
+def update_consensus(holding: dict, consensus: dict) -> None:
+    new_avg = compute_consensus_average(consensus)
+    old_avg = holding.get("consensus_avg")
+    if old_avg is None or new_avg != old_avg:
+        holding["previous_consensus_avg"] = old_avg if old_avg is not None else new_avg
+    holding["consensus"] = {**consensus, "average": new_avg}
+    holding["consensus_avg"] = new_avg
+
+
+def is_price_mismatch(holding: dict, fetched_price: float) -> bool:
+    ref = holding.get("current_price")
+    if not ref or not fetched_price:
+        return False
+    return fetched_price > ref * PRICE_MISMATCH_FACTOR or fetched_price < ref / PRICE_MISMATCH_FACTOR
+
+
+def apply_quote(holding: dict, quote: dict) -> None:
+    holding["day_change_pct"] = quote["day_change_pct"]
+    update_price(holding, quote["price"])
+    try:
+        update_consensus(holding, prices.fetch_analyst_consensus(holding["ticker"]))
+    except PriceError:
+        pass
+
+
+@app.post("/api/holdings/{holding_id}/refresh")
+def refresh_holding_price(holding_id: str, override_price_check: bool = False):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+
+    if holding.get("manual_price"):
+        return {**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True}
+
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+        quote = prices.fetch_quote(holding["ticker"], rate)
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if not override_price_check and is_price_mismatch(holding, quote["price"]):
+        # Don't clobber the user's price — hand the mismatch to the frontend so
+        # it can offer "keep my price (manual)" vs "use the fetched price".
+        return {
+            "id": holding["id"],
+            "ticker": holding["ticker"],
+            "price_mismatch": {
+                "fetched": quote["price"],
+                "current": holding["current_price"],
+                "factor": PRICE_MISMATCH_FACTOR,
+            },
+        }
+
+    apply_quote(holding, quote)
+    save_holdings(holdings)
+    return evaluate_trailing(holding, quote["price"])
+
+
+@app.post("/api/holdings/refresh-all")
+def refresh_all_prices():
+    holdings = load_holdings()
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    results = []
+    for holding in holdings:
+        if holding.get("manual_price"):
+            results.append({**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True})
+            continue
+        try:
+            quote = prices.fetch_quote(holding["ticker"], rate)
+        except PriceError as e:
+            results.append({"id": holding["id"], "ticker": holding["ticker"], "error": str(e)})
+            continue
+        # Bulk can't prompt, so a mismatch just protects the stored price and is
+        # flagged for the user to resolve on a single Refresh of that holding.
+        if is_price_mismatch(holding, quote["price"]):
+            results.append({
+                "id": holding["id"],
+                "ticker": holding["ticker"],
+                "price_mismatch": {
+                    "fetched": quote["price"],
+                    "current": holding["current_price"],
+                    "factor": PRICE_MISMATCH_FACTOR,
+                },
+            })
+            continue
+        apply_quote(holding, quote)
+        results.append(evaluate_trailing(holding, quote["price"]))
+
+    save_holdings(holdings)
+    return results
+
+
+@app.post("/api/holdings/{holding_id}/confirm")
+def confirm_trailing_stop(holding_id: str, req: ConfirmRequest):
+    holdings = load_holdings()
+    holding = find_holding(holdings, holding_id)
+    holding["reference_high"] = req.new_reference_high
+    holding["stop_price"] = req.new_stop_price
+    save_holdings(holdings)
+    return holding
+
+
+@app.get("/api/zacks")
+def get_zacks_ranks():
+    return zacks_import.load_ranks()
+
+
+@app.post("/api/zacks/import")
+def import_zacks(path: Optional[str] = None, default_rank: Optional[int] = None):
+    if path:
+        csv_path = Path(path)
+    else:
+        candidates = sorted(
+            DOWNLOADS_DIR.glob("*.csv"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        candidates = [p for p in candidates if "zacks" in p.name.lower() or "rank" in p.name.lower()]
+        if not candidates:
+            raise HTTPException(
+                status_code=404,
+                detail="No Zacks-looking CSV found in Downloads (expected a filename containing 'zacks' or 'rank')",
+            )
+        csv_path = candidates[0]
+
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {csv_path}")
+
+    try:
+        return zacks_import.import_csv(csv_path, default_rank=default_rank)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/api/zacks/upload")
+async def upload_zacks(file: UploadFile = File(...), default_rank: Optional[int] = None):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir) / file.filename
+        with open(tmp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        try:
+            return zacks_import.import_csv(tmp_path, default_rank=default_rank)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/api/zacks/refresh-consensus")
+def refresh_zacks_consensus():
+    data = zacks_import.load_ranks()
+    tickers = list(data["ranks"].keys())
+    updated = 0
+    errors = []
+
+    for i, ticker in enumerate(tickers):
+        try:
+            consensus = prices.fetch_analyst_consensus(ticker)
+            avg = compute_consensus_average(consensus)
+            data["ranks"][ticker]["consensus"] = {**consensus, "average": avg}
+            data["ranks"][ticker]["consensus_avg"] = avg
+            updated += 1
+        except PriceError as e:
+            errors.append({"ticker": ticker, "error": str(e)})
+        if i < len(tickers) - 1:
+            time.sleep(1)
+
+    zacks_import.save_ranks(data)
+    return {"updated": updated, "total": len(tickers), "errors": errors}
+
+
+@app.post("/api/zacks/{ticker}/analyze")
+def analyze_ticker(ticker: str):
+    try:
+        return synthesis.synthesize(ticker.upper())
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/zacks/compare")
+def compare_tickers(a: str, b: str):
+    # Two independent single-ticker syntheses, neither aware of the other —
+    # deliberate, see docs/plans/synthesized-stock-analysis.md.
+    try:
+        return {"a": synthesis.synthesize(a.upper()), "b": synthesis.synthesize(b.upper())}
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/prices/{ticker}/history")
+def price_history(ticker: str, days: int = 30):
+    ticker = ticker.upper()
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+        usd_prices = alpha_vantage.fetch_daily_prices(ticker, days=days)
+    except (PriceError, AlphaVantageError) as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if not usd_prices:
+        raise HTTPException(status_code=404, detail=f"No price history for '{ticker}'")
+
+    eur_prices = [{"date": p["date"], "close": p["close"] * rate} for p in usd_prices]
+    change_pct = (eur_prices[-1]["close"] - eur_prices[0]["close"]) / eur_prices[0]["close"] * 100
+
+    return {"ticker": ticker, "prices": eur_prices, "change_pct": change_pct}
+
+
+@app.get("/api/opportunities-b")
+def get_opportunities_b():
+    return opportunities_b.load_opportunities_b()
+
+
+@app.post("/api/opportunities-b/refresh")
+def refresh_opportunities_b():
+    # Long-running (~10 min): one recommendation call per S&P 500 name, then
+    # earnings for the shortlist. Synchronous, like the Zacks consensus refresh.
+    try:
+        return opportunities_b.build()
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/sectors")
+def get_sectors():
+    return sectors.load_sector_strength()
+
+
+@app.post("/api/sectors/refresh")
+def refresh_sectors():
+    # ~2.5 min: 11 sector-ETF history pulls, throttled for Alpha Vantage's 5/min.
+    return sectors.build_sector_strength()
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC_DIR / "index.html")
