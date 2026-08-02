@@ -172,12 +172,25 @@ def build(universe_limit: int = None) -> dict:
             time.sleep(RATE_SLEEP)
 
     results.sort(key=lambda r: r["composite"], reverse=True)
+    final = results[:FINAL_SIZE]
+
+    # Price momentum for just the final list (1 Finnhub metric call each — free tier,
+    # no Alpha Vantage budget). 1-week (5-day) and 3-month (13-week) trailing returns.
+    for i, r in enumerate(final):
+        try:
+            ret = prices.fetch_price_returns(r["ticker"])
+            r["move_1w"], r["move_3m"] = ret["move_1w"], ret["move_3m"]
+        except prices.PriceError:
+            r["move_1w"], r["move_3m"] = None, None
+        if i < len(final) - 1:
+            time.sleep(RATE_SLEEP)
+
     out = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "universe_size": len(tickers),
         "passed_filter": len(stage1),
         "fetch_errors": errors,
-        "list": results[:FINAL_SIZE],
+        "list": final,
     }
     OUTPUT_FILE.write_text(json.dumps(out, indent=2))
     return out

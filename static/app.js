@@ -926,7 +926,7 @@ function renderOpportunitiesB() {
     return 0;
   });
 
-  for (const f of ["ticker", "company", "composite", "conviction", "drift"]) {
+  for (const f of ["ticker", "company", "composite", "conviction", "drift", "move_1w", "move_3m"]) {
     const el = document.getElementById(`oppb-arrow-${f}`);
     if (el) el.textContent = f === oppBSortField ? (oppBSortDir === 1 ? "▲" : "▼") : "";
   }
@@ -945,6 +945,8 @@ function renderOpportunitiesB() {
       <td>${consensusLabel(r.consensus_avg)} <span class="subtitle">(${r.consensus.strongBuy} SB / ${r.n})</span></td>
       <td>${r.beats != null ? r.beats + "/" + r.beats_total : "—"}</td>
       <td class="${driftCls}">${driftSym}</td>
+      <td>${coloredPct(r.move_1w)}</td>
+      <td>${coloredPct(r.move_3m)}</td>
       <td>${r.also_zacks_1 ? '<span class="zacks-rank-1">✓</span>' : "—"}</td>
       <td><button class="secondary" onclick="analyzeTicker('${r.ticker}')">Analyze</button></td>
     `;
