@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -22,6 +23,7 @@ from prices import PriceError
 
 DATA_FILE = Path(__file__).parent / "data" / "holdings.json"
 SALES_HISTORY_FILE = Path(__file__).parent / "data" / "sales_history.json"
+PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -104,6 +106,29 @@ def load_sales_history() -> list[dict]:
 
 def save_sales_history(entries: list[dict]) -> None:
     SALES_HISTORY_FILE.write_text(json.dumps(entries, indent=2))
+
+
+def load_portfolio_history() -> list[dict]:
+    if not PORTFOLIO_HISTORY_FILE.exists():
+        return []
+    return json.loads(PORTFOLIO_HISTORY_FILE.read_text())
+
+
+def save_portfolio_history(points: list[dict]) -> None:
+    points.sort(key=lambda p: p["date"])
+    PORTFOLIO_HISTORY_FILE.write_text(json.dumps(points, indent=2))
+
+
+def record_portfolio_snapshot(holdings: list[dict]) -> None:
+    """Upsert today's total portfolio value (shares × current_price, summed) into the
+    history — one point per day, overwriting an earlier same-day refresh."""
+    total = sum(h["shares"] * h["current_price"] for h in holdings)
+    if total <= 0:
+        return
+    today = date.today().isoformat()
+    points = [p for p in load_portfolio_history() if p["date"] != today]
+    points.append({"date": today, "value": total})
+    save_portfolio_history(points)
 
 
 class HoldingIn(BaseModel):
@@ -527,6 +552,7 @@ def refresh_all_prices():
         results.append(evaluate_trailing(holding, quote["price"]))
 
     save_holdings(holdings)
+    record_portfolio_snapshot(holdings)  # one portfolio-value point per day
     return results
 
 
@@ -656,6 +682,62 @@ def refresh_opportunities_b():
         return opportunities_b.build()
     except PriceError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/portfolio-history")
+def get_portfolio_history():
+    return load_portfolio_history()
+
+
+@app.post("/api/portfolio-history/seed")
+def seed_portfolio_history():
+    """Reconstruct an APPROXIMATE backward curve: value current holdings using each
+    ticker's daily price history (Alpha Vantage), so there's a line to look at before
+    the daily recorded points accumulate. Approximate because it applies *today's*
+    share counts and FX rate to past prices (ignores past buys/sells). Fills only dates
+    not already recorded, so real snapshots always win."""
+    holdings = load_holdings()
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # non-manual holdings contribute a historical series; manual ones a flat value.
+    series = {}  # ticker -> {date: close_eur}
+    flat_value = 0.0
+    non_manual = 0
+    for h in holdings:
+        if h.get("manual_price"):
+            flat_value += h["shares"] * h["current_price"]
+            continue
+        non_manual += 1
+        try:
+            hist = alpha_vantage.fetch_daily_prices(h["ticker"], days=90)
+        except AlphaVantageError:
+            continue
+        series[h["ticker"]] = {p["date"]: p["close"] * rate for p in hist}
+
+    # Require *every* non-manual holding — a partial fetch would sum only some
+    # positions and draw a misleadingly-low curve. Better to seed nothing.
+    if len(series) < non_manual:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Only got history for {len(series)} of {non_manual} holdings "
+                   f"(Alpha Vantage daily cap?) — try again tomorrow so the curve isn't understated.",
+        )
+
+    # only dates where every fetched ticker has a price (avoids gaps/jumps)
+    common_dates = set.intersection(*[set(d) for d in series.values()])
+    shares = {h["ticker"]: h["shares"] for h in holdings}
+    reconstructed = []
+    for d in sorted(common_dates):
+        value = flat_value + sum(series[t][d] * shares[t] for t in series)
+        reconstructed.append({"date": d, "value": value, "approx": True})
+
+    existing = {p["date"] for p in load_portfolio_history()}
+    points = load_portfolio_history() + [p for p in reconstructed if p["date"] not in existing]
+    save_portfolio_history(points)
+    return {"seeded": len([p for p in reconstructed if p["date"] not in existing]), "total_points": len(points)}
 
 
 @app.get("/api/sectors")

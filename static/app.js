@@ -281,6 +281,75 @@ async function loadPriceChart(containerId, ticker) {
   }
 }
 
+async function loadPortfolioChart() {
+  const container = document.getElementById("portfolio-chart");
+  if (!container) return;
+  try {
+    const res = await fetch("/api/portfolio-history");
+    renderPortfolioChart(await res.json());
+  } catch (e) {
+    container.innerHTML = `<p class="empty">Chart unavailable: ${e}</p>`;
+  }
+}
+
+function renderPortfolioChart(points) {
+  const container = document.getElementById("portfolio-chart");
+  if (!points || points.length === 0) {
+    container.innerHTML = `<p class="empty">No history yet. Click "Load past ~3 months" for an approximate line — and it records a real point each day you refresh.</p>`;
+    return;
+  }
+  if (points.length === 1) {
+    container.innerHTML = `<p class="empty">One point so far: ${fmt(points[0].value)} on ${points[0].date}. The line grows each day you refresh — or "Load past ~3 months" to seed an approximate history now.</p>`;
+    return;
+  }
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const w = 600;
+  const h = 140;
+  const stepX = w / (points.length - 1);
+  const coords = values.map((v, i) => [i * stepX, h - ((v - min) / range) * h]);
+  const first = values[0];
+  const last = values[values.length - 1];
+  const changePct = ((last - first) / first) * 100;
+  const up = last >= first;
+  const color = up ? "var(--green)" : "var(--rust)";
+  const linePath = coords.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L ${w} ${h} L 0 ${h} Z`;
+  const anyApprox = points.some((p) => p.approx);
+  container.innerHTML = `
+    <div class="price-chart-header">
+      <strong>${fmt(last)} EUR</strong>
+      <span class="${up ? "price-up" : "price-down"}">${changePct >= 0 ? "+" : ""}${euPctFormat.format(changePct)}%</span>
+      <span class="subtitle">${points[0].date} → ${points[points.length - 1].date}${anyApprox ? " · early points are approximate" : ""}</span>
+    </div>
+    <svg viewBox="0 0 ${w} ${h}" class="price-chart-svg" preserveAspectRatio="none">
+      <path d="${areaPath}" fill="${color}" opacity="0.15" stroke="none"></path>
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
+    </svg>`;
+}
+
+async function seedPortfolioHistory() {
+  if (!confirm("Estimate your portfolio's value over the past ~3 months from each holding's price history? It uses ~10 of your 25 daily Alpha Vantage calls and is approximate (based on your current holdings, ignoring past buys/sells).")) return;
+  const btn = document.getElementById("seed-portfolio-btn");
+  btn.disabled = true;
+  btn.textContent = "Loading…";
+  try {
+    const res = await fetch("/api/portfolio-history/seed", { method: "POST" });
+    if (!res.ok) {
+      alert((await res.json()).detail || "Failed to load history.");
+      return;
+    }
+    const data = await res.json();
+    await loadPortfolioChart();
+    alert(`Added ${data.seeded} approximate past points.`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Load past ~3 months (approx)";
+  }
+}
+
 function renderConsensusModal(ticker, consensus, noDataHint) {
   const modal = document.getElementById("consensus-modal");
   const body = document.getElementById("consensus-modal-body");
@@ -831,6 +900,7 @@ async function refreshAllPrices() {
     for (const result of results) {
       renderFlag(result.id, result);
     }
+    await loadPortfolioChart(); // refresh-all recorded a new daily point
   } finally {
     btn.disabled = false;
     btn.textContent = "Refresh all prices";
@@ -1345,4 +1415,4 @@ async function removeSalesEntry(id) {
 }
 
 initInfoTooltips();
-loadZacksStatus().then(() => render()).then(() => refreshAllPrices());
+loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart());

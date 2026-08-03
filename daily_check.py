@@ -122,6 +122,7 @@ def run() -> None:
             breakouts.append(result)
 
     main.save_holdings(holdings)
+    main.record_portfolio_snapshot(holdings)  # daily portfolio-value point for the chart
 
     if not breakouts and not stop_hits and not errors:
         print(f"{date.today()}: nothing to report.")
