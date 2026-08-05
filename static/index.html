@@ -13,6 +13,7 @@
     <button class="tab-btn active" id="tab-btn-stocks" onclick="showTab('stocks')">My Stocks</button>
     <button class="tab-btn" id="tab-btn-opportunities" onclick="showTab('opportunities')">Opportunities</button>
     <button class="tab-btn" id="tab-btn-opportunities-b" onclick="showTab('opportunities-b')">Opportunities B</button>
+    <button class="tab-btn" id="tab-btn-watchlist" onclick="showTab('watchlist')">Watch List</button>
     <button class="tab-btn" id="tab-btn-history" onclick="showTab('history')">History</button>
   </div>
 
@@ -166,6 +167,44 @@
         <input type="text" id="oppb-compare-b" placeholder="Ticker B" style="width:100px" />
         <button class="secondary" onclick="compareTickers('oppb-compare-a', 'oppb-compare-b')">Compare</button>
       </div>
+    </div>
+
+  </div>
+
+  <div id="tab-watchlist" class="tab-content" style="display:none">
+
+    <div class="panel">
+      <h2>Add to watch list</h2>
+      <div class="add-form">
+        <div><label>Ticker</label><input id="watch-ticker-input" placeholder="AAPL" /></div>
+        <button id="watch-add-btn" onclick="addWatchItem()">Add</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Watch List</h2>
+        <button id="watch-refresh-all-btn" class="secondary" onclick="refreshAllWatchlist()">Refresh all</button>
+      </div>
+      <p class="subtitle">Stocks you're considering but haven't bought — manually added and removed. Sorted, not ranked as advice.</p>
+      <div class="table-scroll">
+      <table id="watchlist-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Added</th>
+            <th>Price</th>
+            <th>Score <span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>0–100 Opportunities B score</strong> — same analyst-conviction + earnings-beats + drift composite as the Opportunities B tab, computed live for this ticker. Not a verdict.</span></span></th>
+            <th>1W %</th>
+            <th>3M %</th>
+            <th>Zacks Rank</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="watchlist-body"></tbody>
+      </table>
+      </div>
+      <p id="watchlist-empty-msg" class="empty" style="display:none;">Nothing on your watch list yet — add a ticker above.</p>
     </div>
 
   </div>
