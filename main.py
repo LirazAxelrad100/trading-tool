@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -24,6 +24,7 @@ from prices import PriceError
 DATA_FILE = Path(__file__).parent / "data" / "holdings.json"
 SALES_HISTORY_FILE = Path(__file__).parent / "data" / "sales_history.json"
 PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.json"
+WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -406,6 +407,126 @@ def delete_sales_entry(entry_id: str):
     entries = [e for e in entries if e["id"] != entry_id]
     save_sales_history(entries)
     return {"ok": True}
+
+
+class WatchlistIn(BaseModel):
+    ticker: str
+
+
+def load_watchlist() -> list[dict]:
+    if not WATCHLIST_FILE.exists():
+        return []
+    return json.loads(WATCHLIST_FILE.read_text())
+
+
+def save_watchlist(items: list[dict]) -> None:
+    WATCHLIST_FILE.write_text(json.dumps(items, indent=2))
+
+
+def find_watch_item(items: list[dict], item_id: str) -> dict:
+    for it in items:
+        if it["id"] == item_id:
+            return it
+    raise HTTPException(status_code=404, detail="Watchlist item not found")
+
+
+def fetch_watch_data(ticker: str, rate: float) -> dict:
+    """Best-effort enrichment for one watchlist ticker: current price, 1W/3M trailing
+    returns, the Opportunities-B composite score, and analyst consensus. Price is the
+    only piece that must succeed (raises PriceError, since an unpriceable ticker is
+    almost certainly a typo) — the rest degrade to None rather than blocking add/refresh,
+    same spirit as synthesis.py's _safe()."""
+    quote = prices.fetch_quote(ticker, rate)
+    data = {
+        "current_price": quote["price"],
+        "move_1w": None,
+        "move_3m": None,
+        "score": None,
+        "consensus": None,
+        "last_refreshed": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        returns = prices.fetch_price_returns(ticker)
+        data["move_1w"], data["move_3m"] = returns["move_1w"], returns["move_3m"]
+    except PriceError:
+        pass
+    try:
+        data["score"] = opportunities_b.score_ticker(ticker)
+    except PriceError:
+        pass
+    try:
+        consensus = prices.fetch_analyst_consensus(ticker)
+        data["consensus"] = {**consensus, "average": compute_consensus_average(consensus)}
+    except PriceError:
+        pass
+    return data
+
+
+@app.get("/api/watchlist")
+def list_watchlist():
+    return load_watchlist()
+
+
+@app.post("/api/watchlist")
+def add_watchlist_item(item: WatchlistIn):
+    items = load_watchlist()
+    ticker = item.ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=422, detail="Ticker is required.")
+    if any(it["ticker"] == ticker for it in items):
+        raise HTTPException(status_code=422, detail=f"{ticker} is already on your watch list.")
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+        data = fetch_watch_data(ticker, rate)
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=f"Could not find a price for '{ticker}' — check the symbol. ({e})")
+
+    new_item = {"id": str(uuid.uuid4()), "ticker": ticker, "added_date": date.today().isoformat(), **data}
+    items.append(new_item)
+    save_watchlist(items)
+    return new_item
+
+
+@app.delete("/api/watchlist/{item_id}")
+def delete_watchlist_item(item_id: str):
+    items = load_watchlist()
+    items = [it for it in items if it["id"] != item_id]
+    save_watchlist(items)
+    return {"ok": True}
+
+
+@app.post("/api/watchlist/{item_id}/refresh")
+def refresh_watchlist_item(item_id: str):
+    items = load_watchlist()
+    watch_item = find_watch_item(items, item_id)
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+        watch_item.update(fetch_watch_data(watch_item["ticker"], rate))
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    save_watchlist(items)
+    return watch_item
+
+
+@app.post("/api/watchlist/refresh-all")
+def refresh_all_watchlist():
+    items = load_watchlist()
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    errors = []
+    for i, it in enumerate(items):
+        try:
+            it.update(fetch_watch_data(it["ticker"], rate))
+        except PriceError as e:
+            errors.append({"ticker": it["ticker"], "error": str(e)})
+        if i < len(items) - 1:
+            time.sleep(1)
+
+    save_watchlist(items)
+    return {"items": items, "errors": errors}
 
 
 def evaluate_trailing(holding: dict, current_price: float) -> dict:

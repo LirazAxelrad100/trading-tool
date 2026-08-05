@@ -967,13 +967,108 @@ async function confirmHolding(id, newReferenceHigh, newStopPrice) {
 }
 
 function showTab(name) {
-  const tabs = ["stocks", "opportunities", "opportunities-b", "history"];
+  const tabs = ["stocks", "opportunities", "opportunities-b", "watchlist", "history"];
   for (const t of tabs) {
     document.getElementById(`tab-${t}`).style.display = name === t ? "block" : "none";
     document.getElementById(`tab-btn-${t}`).classList.toggle("active", name === t);
   }
   if (name === "history") loadHistory();
   if (name === "opportunities-b") loadOpportunitiesB();
+  if (name === "watchlist") loadWatchlist();
+}
+
+let watchlist = [];
+
+async function loadWatchlist() {
+  const res = await fetch("/api/watchlist");
+  watchlist = await res.json();
+  renderWatchlist();
+}
+
+function renderWatchlist() {
+  const body = document.getElementById("watchlist-body");
+  const emptyMsg = document.getElementById("watchlist-empty-msg");
+  body.innerHTML = "";
+  emptyMsg.style.display = watchlist.length === 0 ? "block" : "none";
+
+  for (const w of watchlist) {
+    const tr = document.createElement("tr");
+    const scoreText = w.score ? Math.round(w.score.composite * 100) : "—";
+    tr.innerHTML = `
+      <td><span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span></td>
+      <td>${w.added_date}</td>
+      <td>${w.current_price != null ? fmt(w.current_price) : "—"}</td>
+      <td>${scoreText}</td>
+      <td>${coloredPct(w.move_1w)}</td>
+      <td>${coloredPct(w.move_3m)}</td>
+      <td>${zacksCell(w.ticker)}</td>
+      <td>
+        <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
+        <button class="secondary" onclick="refreshWatchItem('${w.id}')">Refresh</button>
+        <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>
+      </td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function showWatchConsensus(id) {
+  const w = watchlist.find((x) => x.id === id);
+  renderConsensusModal(
+    w ? w.ticker : "",
+    w ? w.consensus : null,
+    "No analyst consensus data yet — click Refresh on this item."
+  );
+}
+
+async function addWatchItem() {
+  const input = document.getElementById("watch-ticker-input");
+  const ticker = input.value.trim().toUpperCase();
+  if (!ticker) return;
+  const btn = document.getElementById("watch-add-btn");
+  btn.disabled = true;
+  btn.textContent = "Adding…";
+  try {
+    const res = await fetch("/api/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail || "Failed to add ticker.");
+      return;
+    }
+    input.value = "";
+    await loadWatchlist();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Add";
+  }
+}
+
+async function removeWatchItem(id) {
+  if (!confirm("Remove this ticker from your watch list?")) return;
+  await fetch(`/api/watchlist/${id}`, { method: "DELETE" });
+  await loadWatchlist();
+}
+
+async function refreshWatchItem(id) {
+  await fetch(`/api/watchlist/${id}/refresh`, { method: "POST" });
+  await loadWatchlist();
+}
+
+async function refreshAllWatchlist() {
+  const btn = document.getElementById("watch-refresh-all-btn");
+  btn.disabled = true;
+  btn.textContent = "Refreshing…";
+  try {
+    await fetch("/api/watchlist/refresh-all", { method: "POST" });
+    await loadWatchlist();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Refresh all";
+  }
 }
 
 let lastOppB = [];
