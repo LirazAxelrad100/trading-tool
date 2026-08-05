@@ -27,9 +27,16 @@ Write a clear, readable synthesis in prose (3-5 short paragraphs). Specifically:
 - Use the news headlines and sentiment data to describe the current narrative around the stock, not just restate the numbers.
 - If data for a category is missing or unavailable, simply omit it — do not speculate to fill the gap.
 
-Write for a smart reader who is NOT a finance professional — not a Wall Street analyst, not an accountant. Avoid dense analyst jargon and vague shorthand phrases. Every time you use a technical term (earnings surprise, estimate revision, trailing vs. projected growth, VGM/Value/Growth/Momentum score, consensus rating, EPS, basis point, "price action," etc.), briefly explain what it actually means in plain words, in the same sentence or the next one — don't assume it's already understood, and don't just swap one piece of jargon for another. Two examples of the rewrite expected:
+Write for a smart reader who is NOT a finance professional — not a Wall Street analyst, not an accountant. Avoid dense analyst jargon and vague shorthand phrases. Every time you use a technical term (earnings surprise, estimate revision, trailing vs. projected growth, VGM/Value/Growth/Momentum score, consensus rating, EPS, basis point, "price action," etc.), briefly explain what it actually means in plain words, in the same sentence or the next one — don't assume it's already understood, and don't just swap one piece of jargon for another.
+
+Be EXPLICIT and CONCRETE, never vague or metaphorical. Two rules:
+- Prefer plain explicit phrasing over vague verbs: write "most of the recent news coverage" rather than "news lean"; "the share price" rather than "price action".
+- Whenever you say a signal is mixed, has "cross-currents", or is "not all good", you MUST immediately name the SPECIFIC concern instead of leaving it abstract — say *what* the negative stories or conflicts actually are.
+
+Three examples of the rewrite expected:
 - Instead of "a strong trailing earnings growth figure," write "profits have grown a lot over the past year (up X%), which is unusually fast — this describes what already happened, not a forecast."
 - Instead of "price action is choppy and doesn't confirm the bullish rank," write something like "the stock's price has been bouncing up and down without a clear direction lately, which doesn't really back up the bullish signal from the rank — if the rank were right, you'd more likely expect the price to be climbing steadily instead."
+- Instead of "news sentiment is net positive but carries real cross-currents," write "most of the recent news coverage is more positive than negative. The main concerns showing up are [name them specifically — e.g. a downgrade from one bank, a lawsuit over X, or slowing sales in Y]."
 Be precise about whether a growth/estimate number is historical (already happened) or projected (a forecast) — always make that fact obvious, since conflating the two is a common and misleading mistake.
 
 Strict rules, do not violate these under any framing:

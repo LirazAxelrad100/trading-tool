@@ -5,6 +5,29 @@ async function fetchHoldings() {
   return res.json();
 }
 
+// US market hours (9:30–16:00 ET, Mon–Fri; holidays not accounted for). When closed,
+// Finnhub freezes on the last US close, so prices/Today % won't be live — flag it.
+function usMarketOpen() {
+  const et = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = et.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = et.getHours() * 60 + et.getMinutes();
+  return mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+// Shown as a hint after a refresh, only while the US market is closed.
+function updateMarketStatus() {
+  const el = document.getElementById("market-status");
+  if (!el) return;
+  if (usMarketOpen()) {
+    el.style.display = "none";
+    el.textContent = "";
+  } else {
+    el.textContent = "⧗ US market closed — the prices and Today % you just loaded are the last US close, not live. They'll update after US open (~15:30 CET).";
+    el.style.display = "block";
+  }
+}
+
 // Hover tooltips for the ⓘ header icons. The tooltip is position:fixed (so the
 // table's overflow container can't clip it); we place it under the icon and clamp
 // it inside the viewport on each hover.
@@ -75,13 +98,6 @@ function consensusLabel(avg) {
   if (avg <= 3.5) return "Hold";
   if (avg <= 4.5) return "Sell";
   return "Strong Sell";
-}
-
-function tickerClass(consensusAvg, previousAvg) {
-  if (consensusAvg == null || previousAvg == null) return "";
-  if (consensusAvg < previousAvg) return "consensus-up";
-  if (consensusAvg > previousAvg) return "consensus-down";
-  return "";
 }
 
 let lastHoldings = [];
@@ -399,6 +415,35 @@ function closeConsensusModal() {
   document.getElementById("consensus-modal").style.display = "none";
 }
 
+// Total cell colored by unrealized gain/loss (current value vs. what you paid).
+function gainClass(h) {
+  const cost = h.shares * h.cost_basis;
+  return h.total > cost ? "price-up" : h.total < cost ? "price-down" : "";
+}
+
+function showUnrealized(id) {
+  const h = lastHoldings.find((x) => x.id === id);
+  if (!h) return;
+  const invested = h.shares * h.cost_basis;
+  const gain = h.total - invested;
+  const pct = invested ? (gain / invested) * 100 : 0;
+  const cls = gain >= 0 ? "price-up" : "price-down";
+  document.getElementById("unrealized-title").textContent = `${h.ticker} — unrealized ${gain >= 0 ? "gain" : "loss"}`;
+  document.getElementById("unrealized-body").innerHTML = `
+    <table class="consensus-table">
+      <tr><td>Avg buy-in</td><td>${fmt(h.cost_basis)} EUR</td></tr>
+      <tr><td>Invested (${fmtShares(h.shares)} shares)</td><td>${fmt(invested)} EUR</td></tr>
+      <tr><td>Current value</td><td>${fmt(h.total)} EUR</td></tr>
+      <tr><td>Unrealized ${gain >= 0 ? "gain" : "loss"}</td><td class="${cls}"><strong>${fmt(gain)} EUR (${pct >= 0 ? "+" : ""}${euPctFormat.format(pct)}%)</strong></td></tr>
+    </table>
+    <p class="subtitle">Based on the current price ${fmt(h.current_price)} from the last refresh${h.manual_price ? " (manual)" : ""}.</p>`;
+  document.getElementById("unrealized-modal").style.display = "flex";
+}
+
+function closeUnrealizedModal() {
+  document.getElementById("unrealized-modal").style.display = "none";
+}
+
 function fmtScore(s) {
   return s || "—";
 }
@@ -647,7 +692,7 @@ async function render() {
       continue;
     }
     tr.innerHTML = `
-      <td><span class="ticker-name ${tickerClass(h.consensus_avg, h.previous_consensus_avg)}" onclick="showConsensus('${h.id}')">${h.ticker}</span></td>
+      <td><span class="ticker-name" onclick="showConsensus('${h.id}')">${h.ticker}</span></td>
       <td>${fmtShares(h.shares)}${h.lots && h.lots.length > 1 ? ` <span class="lots-link" onclick="openLotsModal('${h.id}')">(${h.lots.length} lots)</span>` : ""}</td>
       <td>${fmt(h.cost_basis)}</td>
       <td>${h.purchase_date}</td>
@@ -656,7 +701,7 @@ async function render() {
       <td>${fmtPct(h.trailing_pct)}</td>
       <td>${fmt(h.current_price)}${h.manual_price ? ' <span class="subtitle">(manual)</span>' : ""}</td>
       <td class="${dayChangeClass(h.day_change_pct)}">${h.manual_price ? "—" : fmtDayChangePct(h.day_change_pct)}</td>
-      <td>${fmt(h.total)}</td>
+      <td class="${gainClass(h)} total-cell" onclick="showUnrealized('${h.id}')">${fmt(h.total)}</td>
       <td>${fmtPct(h.portfolio_pct)}</td>
       <td>${zacksCell(h.ticker)}</td>
       <td>${EXIT_PLAN_LABELS[h.exit_plan]}</td>
@@ -901,6 +946,7 @@ async function refreshAllPrices() {
       renderFlag(result.id, result);
     }
     await loadPortfolioChart(); // refresh-all recorded a new daily point
+    updateMarketStatus();
   } finally {
     btn.disabled = false;
     btn.textContent = "Refresh all prices";

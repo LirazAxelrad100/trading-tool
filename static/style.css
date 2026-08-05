@@ -142,6 +142,18 @@ button.danger { background: var(--rust); }
 
 .sell-warn { color: var(--amber); font-size: 0.82rem; margin-top: 0.35rem; }
 
+.market-hint {
+  color: var(--amber);
+  background: rgba(224, 169, 57, 0.08);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.75rem;
+}
+
+.total-cell { cursor: pointer; }
+.total-cell:hover { text-decoration: underline; }
 .lots-link { color: var(--accent); cursor: pointer; font-size: 0.8rem; }
 .lots-link:hover { text-decoration: underline; }
 
@@ -190,8 +202,6 @@ th.sortable:hover { color: var(--text); }
 
 .ticker-name { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .zacks-rank-1 { color: var(--green); font-weight: 600; }
-.ticker-name.consensus-up { color: var(--green); }
-.ticker-name.consensus-down { color: var(--rust); }
 
 .modal-overlay {
   display: none;
