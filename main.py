@@ -413,6 +413,10 @@ class WatchlistIn(BaseModel):
     ticker: str
 
 
+class WatchlistNoteIn(BaseModel):
+    note: str = ""
+
+
 def load_watchlist() -> list[dict]:
     if not WATCHLIST_FILE.exists():
         return []
@@ -481,7 +485,7 @@ def add_watchlist_item(item: WatchlistIn):
     except PriceError as e:
         raise HTTPException(status_code=502, detail=f"Could not find a price for '{ticker}' — check the symbol. ({e})")
 
-    new_item = {"id": str(uuid.uuid4()), "ticker": ticker, "added_date": date.today().isoformat(), **data}
+    new_item = {"id": str(uuid.uuid4()), "ticker": ticker, "added_date": date.today().isoformat(), "note": "", **data}
     items.append(new_item)
     save_watchlist(items)
     return new_item
@@ -493,6 +497,15 @@ def delete_watchlist_item(item_id: str):
     items = [it for it in items if it["id"] != item_id]
     save_watchlist(items)
     return {"ok": True}
+
+
+@app.put("/api/watchlist/{item_id}/note")
+def update_watchlist_note(item_id: str, body: WatchlistNoteIn):
+    items = load_watchlist()
+    watch_item = find_watch_item(items, item_id)
+    watch_item["note"] = body.note
+    save_watchlist(items)
+    return watch_item
 
 
 @app.post("/api/watchlist/{item_id}/refresh")

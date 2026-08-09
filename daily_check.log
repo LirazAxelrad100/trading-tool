@@ -183,3 +183,38 @@ Daily trailing-stop check — 2026-08-04
 1 holding(s) hit a new trailing high:
   - PLTR: up 25,8% (109,46 -> 137,69). Current stop 98,51, suggested new stop 123,92.
 
+/Users/axelrad/Documents/projects/trading-tool/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Daily trailing-stop check — 2026-08-05
+
+1 holding(s) at or below stop loss:
+  - AMD: at or below stop loss (price 416,13, stop 427,41). Exit plan: Hold / reassess. Estimated gain: 517,33, estimated tax: 136,45. Analyst consensus (2026-08-01): 16 strong buy, 32 buy, 10 hold, 0 sell, 0 strong sell.
+
+/Users/axelrad/Documents/projects/trading-tool/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Daily trailing-stop check — 2026-08-06
+
+2 holding(s) at or below stop loss:
+  - AMD: at or below stop loss (price 426,38, stop 427,41). Exit plan: Hold / reassess. Estimated gain: 517,33, estimated tax: 136,45. Analyst consensus (2026-08-01): 16 strong buy, 32 buy, 10 hold, 0 sell, 0 strong sell.
+  - WDC: at or below stop loss (price 405,31, stop 435,56). Exit plan: Hold / reassess. Estimated gain: 16.378,37, estimated tax: 4.319,80. Analyst consensus (2026-08-01): 7 strong buy, 18 buy, 5 hold, 0 sell, 0 strong sell.
+
+/Users/axelrad/Documents/projects/trading-tool/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Daily trailing-stop check — 2026-08-07
+
+4 holding(s) at or below stop loss:
+  - AMD: at or below stop loss (price 416,38, stop 427,41). Exit plan: Hold / reassess. Estimated gain: 517,33, estimated tax: 136,45. Analyst consensus (2026-08-01): 16 strong buy, 32 buy, 10 hold, 0 sell, 0 strong sell.
+  - MU: at or below stop loss (price 744,38, stop 768,24). Exit plan: Hold / reassess. Estimated gain: 5.834,91, estimated tax: 1.538,96. Analyst consensus (2026-08-01): 18 strong buy, 33 buy, 4 hold, 1 sell, 0 strong sell.
+  - WDC: at or below stop loss (price 369,74, stop 435,56). Exit plan: Hold / reassess. Estimated gain: 16.378,37, estimated tax: 4.319,80. Analyst consensus (2026-08-01): 7 strong buy, 18 buy, 5 hold, 0 sell, 0 strong sell.
+  - DK: at or below stop loss (price 50,96, stop 51,44). Exit plan: Hold / reassess. Estimated loss: -470,01, estimated tax: 0,00. Analyst consensus (2026-08-01): 4 strong buy, 9 buy, 7 hold, 1 sell, 0 strong sell.
+
+/Users/axelrad/Documents/projects/trading-tool/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Daily trailing-stop check — 2026-08-08
+
+4 holding(s) at or below stop loss:
+  - AMD: at or below stop loss (price 419,04, stop 427,41). Exit plan: Hold / reassess. Estimated gain: 517,33, estimated tax: 136,45. Analyst consensus (2026-08-01): 16 strong buy, 32 buy, 10 hold, 0 sell, 0 strong sell.
+  - MU: at or below stop loss (price 760,79, stop 768,24). Exit plan: Hold / reassess. Estimated gain: 5.834,91, estimated tax: 1.538,96. Analyst consensus (2026-08-01): 18 strong buy, 33 buy, 4 hold, 1 sell, 0 strong sell.
+  - WDC: at or below stop loss (price 376,51, stop 435,56). Exit plan: Hold / reassess. Estimated gain: 16.378,37, estimated tax: 4.319,80. Analyst consensus (2026-08-01): 7 strong buy, 18 buy, 5 hold, 0 sell, 0 strong sell.
+  - DK: at or below stop loss (price 50,68, stop 51,44). Exit plan: Hold / reassess. Estimated loss: -470,01, estimated tax: 0,00. Analyst consensus (2026-08-01): 4 strong buy, 9 buy, 7 hold, 1 sell, 0 strong sell.
+

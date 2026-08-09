@@ -52,6 +52,7 @@ h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
 .table-scroll { overflow-x: auto; }
+.watch-note-input { min-width: 180px; }
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 #holdings-table { min-width: 900px; }
 th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
