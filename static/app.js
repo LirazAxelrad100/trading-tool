@@ -1002,14 +1002,32 @@ function renderWatchlist() {
       <td>${coloredPct(w.move_1w)}</td>
       <td>${coloredPct(w.move_3m)}</td>
       <td>${zacksCell(w.ticker)}</td>
+      <td></td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
         <button class="secondary" onclick="refreshWatchItem('${w.id}')">Refresh</button>
         <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>
       </td>
     `;
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.className = "watch-note-input";
+    noteInput.placeholder = "Why this ticker?";
+    noteInput.value = w.note || "";
+    noteInput.addEventListener("change", () => saveWatchNote(w.id, noteInput.value));
+    tr.children[7].appendChild(noteInput);
     body.appendChild(tr);
   }
+}
+
+async function saveWatchNote(id, note) {
+  await fetch(`/api/watchlist/${id}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  const w = watchlist.find((x) => x.id === id);
+  if (w) w.note = note;
 }
 
 function showWatchConsensus(id) {

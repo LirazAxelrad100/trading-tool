@@ -4,6 +4,26 @@ Personal decumulation trading tool for a German tax resident (Berlin), tracking 
 
 ## Running it
 
+The web server runs as a **launchd agent** (`~/Library/LaunchAgents/com.tradingtool.webserver.plist`, `RunAtLoad` + `KeepAlive`), so it auto-starts at login and restarts within ~10s if it dies. `http://127.0.0.1:8000` should always be up — no manual start needed. This is the fix for the recurring "can't connect" problem: previously the server only ran when a terminal was open, so it died on logout/sleep/reboot.
+
+Everyday commands:
+
+```bash
+# Is it running? (a PID in the first column = live)
+launchctl list | grep webserver
+
+# Reload after editing code (launchd runs WITHOUT --reload, so changes need a manual restart)
+launchctl kickstart -k gui/$(id -u)/com.tradingtool.webserver
+
+# Stop auto-start entirely / re-enable
+launchctl unload ~/Library/LaunchAgents/com.tradingtool.webserver.plist
+launchctl load   ~/Library/LaunchAgents/com.tradingtool.webserver.plist
+```
+
+Server logs go to `webserver.log`. If launchd shows a stale non-zero exit code but there's a live PID and `curl http://127.0.0.1:8000/` returns 200, it's fine — the code is just the *last* exit, not current state.
+
+Manual run (dev only, e.g. to see live-reload on edits — don't run alongside the launchd one or you'll get an "address already in use" port clash):
+
 ```bash
 ./venv/bin/uvicorn main:app --reload --port 8000
 ```
