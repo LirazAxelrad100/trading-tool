@@ -206,6 +206,12 @@
       </table>
       </div>
       <p id="watchlist-empty-msg" class="empty" style="display:none;">Nothing on your watch list yet — add a ticker above.</p>
+      <div class="compare-bar">
+        <input type="text" id="watch-compare-a" placeholder="Ticker A" style="width:100px" />
+        <span class="subtitle">vs</span>
+        <input type="text" id="watch-compare-b" placeholder="Ticker B" style="width:100px" />
+        <button class="secondary" onclick="compareTickers('watch-compare-a', 'watch-compare-b')">Compare</button>
+      </div>
     </div>
 
   </div>
