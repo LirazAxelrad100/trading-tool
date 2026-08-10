@@ -191,12 +191,12 @@
       <table id="watchlist-table">
         <thead>
           <tr>
-            <th>Ticker</th>
+            <th class="sortable" onclick="watchSortBy('ticker')">Ticker <span id="watch-arrow-ticker" class="arrow"></span></th>
             <th>Added</th>
             <th>Price</th>
-            <th>Score <span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>0–100 Opportunities B score</strong> — same analyst-conviction + earnings-beats + drift composite as the Opportunities B tab, computed live for this ticker. Not a verdict.</span></span></th>
-            <th>1W %</th>
-            <th>3M %</th>
+            <th class="sortable" onclick="watchSortBy('score')">Score <span id="watch-arrow-score" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>0–100 Opportunities B score</strong> — same analyst-conviction + earnings-beats + drift composite as the Opportunities B tab, computed live for this ticker. Not a verdict.</span></span></th>
+            <th class="sortable" onclick="watchSortBy('move_1w')">1W % <span id="watch-arrow-move_1w" class="arrow"></span></th>
+            <th class="sortable" onclick="watchSortBy('move_3m')">3M % <span id="watch-arrow-move_3m" class="arrow"></span></th>
             <th>Zacks Rank</th>
             <th>Note</th>
             <th></th>

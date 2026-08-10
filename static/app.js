@@ -978,11 +978,29 @@ function showTab(name) {
 }
 
 let watchlist = [];
+let watchSortField = null;
+let watchSortDir = 1;
 
 async function loadWatchlist() {
   const res = await fetch("/api/watchlist");
   watchlist = await res.json();
   renderWatchlist();
+}
+
+function watchSortBy(field) {
+  if (watchSortField === field) {
+    watchSortDir *= -1;
+  } else {
+    watchSortField = field;
+    watchSortDir = 1;
+  }
+  renderWatchlist();
+}
+
+function watchSortValue(w, field) {
+  if (field === "score") return w.score ? w.score.composite : null;
+  if (field === "ticker") return w.ticker.toLowerCase();
+  return w[field];
 }
 
 function renderWatchlist() {
@@ -991,7 +1009,27 @@ function renderWatchlist() {
   body.innerHTML = "";
   emptyMsg.style.display = watchlist.length === 0 ? "block" : "none";
 
-  for (const w of watchlist) {
+  const rows = [...watchlist];
+  if (watchSortField) {
+    rows.sort((a, b) => {
+      const av = watchSortValue(a, watchSortField);
+      const bv = watchSortValue(b, watchSortField);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (av < bv) return -1 * watchSortDir;
+      if (av > bv) return 1 * watchSortDir;
+      return 0;
+    });
+  }
+
+  for (const field of ["ticker", "score", "move_1w", "move_3m"]) {
+    const el = document.getElementById(`watch-arrow-${field}`);
+    if (!el) continue;
+    el.textContent = field === watchSortField ? (watchSortDir === 1 ? "▲" : "▼") : "";
+  }
+
+  for (const w of rows) {
     const tr = document.createElement("tr");
     const scoreText = w.score ? Math.round(w.score.composite * 100) : "—";
     tr.innerHTML = `
