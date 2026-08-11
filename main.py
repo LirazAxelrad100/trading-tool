@@ -635,19 +635,29 @@ def apply_quote(holding: dict, quote: dict, current_fx_rate: float) -> None:
     close", not "vs. your last refresh", so applying it on top of an
     already-rolled-forward current_price would double-count the same move on a
     second same-day refresh. A holding with no anchor yet (first refresh under
-    this logic) bootstraps one from its current stored price."""
+    this logic) bootstraps one from its current stored price.
+
+    While the US market is closed, Finnhub is frozen on the last close, so
+    day_change_pct is a fully-realized move already reflected in reality (and
+    likely already in a TR-verified anchor) — applying it would double-count
+    that move. Skip the roll entirely in that case; still record day_change_pct
+    since the Today % badge shows it regardless, but leave the anchor alone too
+    so the first refresh after the market opens bootstraps cleanly."""
     holding["day_change_pct"] = quote["day_change_pct"]
-    day_change_pct = quote["day_change_pct"] or 0.0
-    previous_close_usd = quote.get("previous_close_usd")
 
-    if holding.get("anchor_previous_close_usd") != previous_close_usd or "price_anchor" not in holding:
-        holding["price_anchor"] = holding["current_price"]
-        holding["anchor_fx_rate"] = current_fx_rate
-        holding["anchor_previous_close_usd"] = previous_close_usd
+    if prices.us_market_open():
+        day_change_pct = quote["day_change_pct"] or 0.0
+        previous_close_usd = quote.get("previous_close_usd")
 
-    fx_ratio = current_fx_rate / holding["anchor_fx_rate"]
-    new_price = holding["price_anchor"] * (1 + day_change_pct) * fx_ratio
-    update_price(holding, new_price)
+        if holding.get("anchor_previous_close_usd") != previous_close_usd or "price_anchor" not in holding:
+            holding["price_anchor"] = holding["current_price"]
+            holding["anchor_fx_rate"] = current_fx_rate
+            holding["anchor_previous_close_usd"] = previous_close_usd
+
+        fx_ratio = current_fx_rate / holding["anchor_fx_rate"]
+        new_price = holding["price_anchor"] * (1 + day_change_pct) * fx_ratio
+        update_price(holding, new_price)
+
     try:
         update_consensus(holding, prices.fetch_analyst_consensus(holding["ticker"]))
     except PriceError:
