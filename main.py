@@ -634,8 +634,20 @@ def apply_quote(holding: dict, quote: dict, current_fx_rate: float) -> None:
     changes (a new trading day). day_change_pct is always "vs. yesterday's
     close", not "vs. your last refresh", so applying it on top of an
     already-rolled-forward current_price would double-count the same move on a
-    second same-day refresh. A holding with no anchor yet (first refresh under
-    this logic) bootstraps one from its current stored price.
+    second same-day refresh.
+
+    Two different situations both leave a holding with no anchor, and they need
+    different bootstrap math. A genuine new trading day (anchor_previous_close_usd
+    is present but stale) means current_price is our last TR-verified value as of
+    a prior close — a valid "0%" baseline, so today's full move applies to it as-is.
+    A manual price edit (main.py's PUT handler) or a brand-new holding instead
+    leaves current_price representing "right now" — it already includes whatever
+    move has happened today, so naively treating it as the baseline and applying
+    day_change_pct on top would double-count that already-realized move (real
+    incident 2026-08-11: every holding edited that morning showed a fresh,
+    same-direction-as-the-day's-move error on its very next refresh). For that
+    case the anchor is backed out by dividing by (1 + day_change_pct) instead, so
+    this refresh reproduces the price you just entered instead of jumping.
 
     While the US market is closed, Finnhub is frozen on the last close, so
     day_change_pct is a fully-realized move already reflected in reality (and
@@ -649,7 +661,18 @@ def apply_quote(holding: dict, quote: dict, current_fx_rate: float) -> None:
         day_change_pct = quote["day_change_pct"] or 0.0
         previous_close_usd = quote.get("previous_close_usd")
 
-        if holding.get("anchor_previous_close_usd") != previous_close_usd or "price_anchor" not in holding:
+        if "anchor_previous_close_usd" not in holding:
+            # No anchor at all: either a brand-new holding, or one whose anchor was
+            # just cleared by a manual price edit this session. current_price means
+            # "right now", not "prior close" — back out the equivalent close-basis
+            # anchor so this call reproduces current_price instead of double-
+            # counting today's already-realized move.
+            holding["price_anchor"] = holding["current_price"] / (1 + day_change_pct)
+            holding["anchor_fx_rate"] = current_fx_rate
+            holding["anchor_previous_close_usd"] = previous_close_usd
+        elif holding["anchor_previous_close_usd"] != previous_close_usd:
+            # Genuine new trading day — current_price is our last TR-verified value
+            # as of a prior close, a valid 0%-baseline. Roll it by today's full move.
             holding["price_anchor"] = holding["current_price"]
             holding["anchor_fx_rate"] = current_fx_rate
             holding["anchor_previous_close_usd"] = previous_close_usd
