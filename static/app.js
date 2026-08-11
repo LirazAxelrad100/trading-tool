@@ -1042,7 +1042,7 @@ function renderWatchlist() {
       <td>${scoreText}</td>
       <td>${coloredPct(w.move_1w)}</td>
       <td>${coloredPct(w.move_3m)}</td>
-      <td>${zacksCell(w.ticker)}</td>
+      <td>${zacksCell(w)}</td>
       <td></td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
