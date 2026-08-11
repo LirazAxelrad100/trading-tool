@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import alpha_vantage
+import consensus_store
 import opportunities_b
 import prices
 import sectors
@@ -37,7 +38,6 @@ EXIT_PLAN_LABELS = {
     "hold": "Hold / reassess",
 }
 CAPITAL_GAINS_TAX_RATE = 0.26375
-CONSENSUS_WEIGHTS = {"strong_buy": 1, "buy": 2, "hold": 3, "sell": 4, "strong_sell": 5}
 
 
 def load_holdings() -> list[dict]:
@@ -202,7 +202,10 @@ def find_holding(holdings: list[dict], holding_id: str) -> dict:
 
 @app.get("/api/holdings")
 def list_holdings():
-    return load_holdings()
+    holdings = load_holdings()
+    for h in holdings:
+        h.update(consensus_store.overlay_consensus(h["ticker"]))
+    return holdings
 
 
 @app.post("/api/holdings")
@@ -467,8 +470,7 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
     except PriceError:
         pass
     try:
-        consensus = prices.fetch_analyst_consensus(ticker)
-        data["consensus"] = {**consensus, "average": compute_consensus_average(consensus)}
+        data["consensus"] = consensus_store.refresh(ticker)
     except PriceError:
         pass
     return data
@@ -476,7 +478,10 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
 
 @app.get("/api/watchlist")
 def list_watchlist():
-    return load_watchlist()
+    items = load_watchlist()
+    for it in items:
+        it.update(consensus_store.overlay_consensus(it["ticker"]))
+    return items
 
 
 @app.post("/api/watchlist")
@@ -594,20 +599,15 @@ def update_price(holding: dict, new_price: float) -> None:
 
 
 
-def compute_consensus_average(consensus: dict) -> Optional[float]:
-    total = sum(consensus[key] for key in CONSENSUS_WEIGHTS)
-    if total == 0:
-        return None
-    weighted = sum(consensus[key] * weight for key, weight in CONSENSUS_WEIGHTS.items())
-    return weighted / total
-
-
-def update_consensus(holding: dict, consensus: dict) -> None:
-    new_avg = compute_consensus_average(consensus)
+def update_consensus(holding: dict, entry: dict) -> None:
+    """entry is a consensus_store entry (already has "average" computed) — the single
+    shared fetch, not an independent one, so this holding's number matches whatever
+    Opportunities/Watchlist/Analyze show for the same ticker. See consensus_store.py."""
+    new_avg = entry["average"]
     old_avg = holding.get("consensus_avg")
     if old_avg is None or new_avg != old_avg:
         holding["previous_consensus_avg"] = old_avg if old_avg is not None else new_avg
-    holding["consensus"] = {**consensus, "average": new_avg}
+    holding["consensus"] = entry
     holding["consensus_avg"] = new_avg
 
 
@@ -659,7 +659,7 @@ def apply_quote(holding: dict, quote: dict, current_fx_rate: float) -> None:
         update_price(holding, new_price)
 
     try:
-        update_consensus(holding, prices.fetch_analyst_consensus(holding["ticker"]))
+        update_consensus(holding, consensus_store.refresh(holding["ticker"]))
     except PriceError:
         pass
 
@@ -769,7 +769,10 @@ def confirm_trailing_stop(holding_id: str, req: ConfirmRequest):
 
 @app.get("/api/zacks")
 def get_zacks_ranks():
-    return zacks_import.load_ranks()
+    data = zacks_import.load_ranks()
+    for ticker, entry in data["ranks"].items():
+        entry.update(consensus_store.overlay_consensus(ticker))
+    return data
 
 
 @app.post("/api/zacks/import")
@@ -820,10 +823,9 @@ def refresh_zacks_consensus():
 
     for i, ticker in enumerate(tickers):
         try:
-            consensus = prices.fetch_analyst_consensus(ticker)
-            avg = compute_consensus_average(consensus)
-            data["ranks"][ticker]["consensus"] = {**consensus, "average": avg}
-            data["ranks"][ticker]["consensus_avg"] = avg
+            entry = consensus_store.refresh(ticker)
+            data["ranks"][ticker]["consensus"] = entry
+            data["ranks"][ticker]["consensus_avg"] = entry["average"]
             updated += 1
         except PriceError as e:
             errors.append({"ticker": ticker, "error": str(e)})

@@ -7,6 +7,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 
 import alpha_vantage
+import consensus_store
 import opportunities_b
 import prices
 import sectors
@@ -53,7 +54,7 @@ def _safe(fn, *args, **kwargs):
         return {"error": str(e)}
 
 
-CONSENSUS_WEIGHTS = {"strong_buy": 1, "buy": 2, "hold": 3, "sell": 4, "strong_sell": 5}
+CONSENSUS_WEIGHTS = consensus_store.CONSENSUS_WEIGHTS
 
 
 def _consensus_summary(c) -> Optional[dict]:
@@ -141,7 +142,7 @@ def derive_signals(data: dict) -> dict:
 
 def gather_ticker_data(ticker: str) -> dict:
     zacks_data = zacks_import.load_ranks()["ranks"].get(ticker)
-    consensus = _safe(prices.fetch_analyst_consensus, ticker)
+    consensus = _safe(consensus_store.refresh, ticker)
     earnings_history = _safe(prices.fetch_earnings_history, ticker)
     earnings_calendar = _safe(prices.fetch_earnings_calendar, ticker)
     insider_transactions = _safe(prices.fetch_insider_transactions, ticker)

@@ -103,10 +103,12 @@ function consensusLabel(avg) {
 let lastHoldings = [];
 let zacksRanks = {};
 
-function zacksCell(ticker) {
-  const entry = zacksRanks[ticker];
-  if (!entry) return "—";
-  return entry.rank === 1 ? `<span class="zacks-rank-1">1</span>` : String(entry.rank);
+function zacksCell(h) {
+  const entry = zacksRanks[h.ticker];
+  const rankPart =
+    entry == null ? "—" : entry.rank === 1 ? `<span class="zacks-rank-1">1</span>` : String(entry.rank);
+  const avgPart = h.consensus_avg != null ? h.consensus_avg.toFixed(2) : "—";
+  return `${rankPart} / ${avgPart}`;
 }
 
 async function loadZacksStatus() {
@@ -681,9 +683,10 @@ async function render() {
         <td class="${dayChangeClass(h.day_change_pct)}">${fmtDayChangePct(h.day_change_pct)}</td>
         <td>${fmt(h.total)}</td>
         <td>${fmtPct(h.portfolio_pct)}</td>
-        <td>${zacksCell(h.ticker)}</td>
-        <td>${exitPlanSelect(h.id, h.exit_plan)}</td>
+        <td>${zacksCell(h)}</td>
         <td>
+          <label class="subtitle" style="display:block;">Exit plan</label>
+          ${exitPlanSelect(h.id, h.exit_plan)}
           <button onclick="saveEdit('${h.id}')">Save</button>
           <button class="secondary" onclick="cancelEdit()">Cancel</button>
         </td>
@@ -703,9 +706,9 @@ async function render() {
       <td class="${dayChangeClass(h.day_change_pct)}">${h.manual_price ? "—" : fmtDayChangePct(h.day_change_pct)}</td>
       <td class="${gainClass(h)} total-cell" onclick="showUnrealized('${h.id}')">${fmt(h.total)}</td>
       <td>${fmtPct(h.portfolio_pct)}</td>
-      <td>${zacksCell(h.ticker)}</td>
-      <td>${EXIT_PLAN_LABELS[h.exit_plan]}</td>
+      <td>${zacksCell(h)}</td>
       <td>
+        <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
         ${h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
         <button class="secondary" onclick="openLotsModal('${h.id}')">Lots</button>
         <button class="secondary" onclick="editHolding('${h.id}')">Edit</button>
