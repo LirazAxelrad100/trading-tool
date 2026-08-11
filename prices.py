@@ -1,7 +1,8 @@
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -15,6 +16,19 @@ FRANKFURTER_URL = "https://api.frankfurter.app/latest"
 
 class PriceError(Exception):
     pass
+
+
+def us_market_open() -> bool:
+    """US regular session, 9:30-16:00 ET, Mon-Fri (holidays not accounted for) —
+    mirrors usMarketOpen() in static/app.js. While closed, Finnhub freezes on the
+    last US close, so day_change_pct reflects an already-fully-realized move, not
+    a live one — apply_quote (main.py) must not roll a stored price forward by it,
+    or it double-counts a move already baked into a TR-verified anchor."""
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.weekday() >= 5:
+        return False
+    minutes = now_et.hour * 60 + now_et.minute
+    return 9 * 60 + 30 <= minutes < 16 * 60
 
 
 def _finnhub_get(path: str, params: dict) -> dict:
