@@ -56,6 +56,7 @@ def fetch_quote(ticker: str, usd_to_eur_rate: float) -> dict:
     return {
         "price": price_usd * usd_to_eur_rate,
         "day_change_pct": dp / 100 if dp is not None else None,
+        "previous_close_usd": data.get("pc"),
     }
 
 

@@ -303,6 +303,14 @@ def update_holding(holding_id: str, update: HoldingUpdate):
     for key, value in changes.items():
         holding[key] = value
 
+    if "current_price" in changes:
+        # A manual price edit invalidates the refresh anchor (apply_quote) — otherwise
+        # a same-day refresh right after this edit would ignore it and roll forward
+        # from the stale pre-edit anchor instead. See apply_quote in main.py.
+        holding.pop("price_anchor", None)
+        holding.pop("anchor_fx_rate", None)
+        holding.pop("anchor_previous_close_usd", None)
+
     recompute_aggregates(holding)
     holding["trailing_pct"] = (holding["reference_high"] - holding["stop_price"]) / holding["reference_high"]
     save_holdings(holdings)
@@ -610,9 +618,36 @@ def is_price_mismatch(holding: dict, fetched_price: float) -> bool:
     return fetched_price > ref * PRICE_MISMATCH_FACTOR or fetched_price < ref / PRICE_MISMATCH_FACTOR
 
 
-def apply_quote(holding: dict, quote: dict) -> None:
+def apply_quote(holding: dict, quote: dict, current_fx_rate: float) -> None:
+    """Roll the price forward from a fixed EUR anchor (our believed price as of
+    Finnhub's own previous close) by today's relative move (day_change_pct) and
+    by how much the USD/EUR rate moved since that anchor was set — instead of
+    overwriting with Finnhub's raw converted price. Finnhub's absolute number
+    never matches Trade Republic's exactly (different venue for the underlying
+    quote, different FX conversion), so replacing the stored price outright
+    re-imports that gap on every refresh. Rolling forward relatively keeps it
+    anchored to whatever true TR price it was last set to (manually, on a Sell,
+    etc.) — see CLAUDE.md.
+
+    The anchor — not the mutable current_price — is what day_change_pct gets
+    applied to, and only advances when Finnhub's previous_close_usd itself
+    changes (a new trading day). day_change_pct is always "vs. yesterday's
+    close", not "vs. your last refresh", so applying it on top of an
+    already-rolled-forward current_price would double-count the same move on a
+    second same-day refresh. A holding with no anchor yet (first refresh under
+    this logic) bootstraps one from its current stored price."""
     holding["day_change_pct"] = quote["day_change_pct"]
-    update_price(holding, quote["price"])
+    day_change_pct = quote["day_change_pct"] or 0.0
+    previous_close_usd = quote.get("previous_close_usd")
+
+    if holding.get("anchor_previous_close_usd") != previous_close_usd or "price_anchor" not in holding:
+        holding["price_anchor"] = holding["current_price"]
+        holding["anchor_fx_rate"] = current_fx_rate
+        holding["anchor_previous_close_usd"] = previous_close_usd
+
+    fx_ratio = current_fx_rate / holding["anchor_fx_rate"]
+    new_price = holding["price_anchor"] * (1 + day_change_pct) * fx_ratio
+    update_price(holding, new_price)
     try:
         update_consensus(holding, prices.fetch_analyst_consensus(holding["ticker"]))
     except PriceError:
@@ -624,11 +659,24 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
     holdings = load_holdings()
     holding = find_holding(holdings, holding_id)
 
-    if holding.get("manual_price"):
-        return {**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True}
-
     try:
         rate = prices.fetch_usd_to_eur_rate()
+    except PriceError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if holding.get("manual_price"):
+        # The absolute Finnhub price is the wrong instrument/ratio for these, so it's
+        # never usable as-is — but the ticker's own day_change_pct still is (see
+        # apply_quote). If even that fails to fetch, just keep the price frozen.
+        try:
+            quote = prices.fetch_quote(holding["ticker"], rate)
+        except PriceError:
+            return {**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True}
+        apply_quote(holding, quote, rate)
+        save_holdings(holdings)
+        return evaluate_trailing(holding, holding["current_price"])
+
+    try:
         quote = prices.fetch_quote(holding["ticker"], rate)
     except PriceError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -646,9 +694,9 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
             },
         }
 
-    apply_quote(holding, quote)
+    apply_quote(holding, quote, rate)
     save_holdings(holdings)
-    return evaluate_trailing(holding, quote["price"])
+    return evaluate_trailing(holding, holding["current_price"])
 
 
 @app.post("/api/holdings/refresh-all")
@@ -662,7 +710,16 @@ def refresh_all_prices():
     results = []
     for holding in holdings:
         if holding.get("manual_price"):
-            results.append({**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True})
+            # See refresh_holding_price: the absolute fetched price is never usable
+            # for these, but day_change_pct still is. Keep the price frozen if even
+            # that fails to fetch.
+            try:
+                quote = prices.fetch_quote(holding["ticker"], rate)
+            except PriceError:
+                results.append({**evaluate_trailing(holding, holding["current_price"]), "skipped_manual": True})
+                continue
+            apply_quote(holding, quote, rate)
+            results.append(evaluate_trailing(holding, holding["current_price"]))
             continue
         try:
             quote = prices.fetch_quote(holding["ticker"], rate)
@@ -682,8 +739,8 @@ def refresh_all_prices():
                 },
             })
             continue
-        apply_quote(holding, quote)
-        results.append(evaluate_trailing(holding, quote["price"]))
+        apply_quote(holding, quote, rate)
+        results.append(evaluate_trailing(holding, holding["current_price"]))
 
     save_holdings(holdings)
     record_portfolio_snapshot(holdings)  # one portfolio-value point per day

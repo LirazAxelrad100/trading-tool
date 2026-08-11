@@ -99,23 +99,17 @@ def run() -> None:
     errors = []
 
     for holding in holdings:
-        # Manual-price holdings have no live feed that matches the instrument the
-        # user holds (e.g. an EU-listed ordinary share vs. its US ADR) — skip them.
-        if holding.get("manual_price"):
-            continue
         try:
             quote = prices.fetch_quote(holding["ticker"], rate)
         except prices.PriceError as e:
-            errors.append({"ticker": holding["ticker"], "error": str(e)})
+            # Manual-price holdings (e.g. an EU-listed ordinary share vs. its US
+            # ADR) commonly have no live feed at all — that's not an error, just
+            # keep the price frozen. A real ticker failing to fetch still counts.
+            if not holding.get("manual_price"):
+                errors.append({"ticker": holding["ticker"], "error": str(e)})
             continue
-        current_price = quote["price"]
-        holding["day_change_pct"] = quote["day_change_pct"]
-        main.update_price(holding, current_price)
-        try:
-            main.update_consensus(holding, prices.fetch_analyst_consensus(holding["ticker"]))
-        except prices.PriceError:
-            pass
-        result = main.evaluate_trailing(holding, current_price)
+        main.apply_quote(holding, quote, rate)
+        result = main.evaluate_trailing(holding, holding["current_price"])
         if result["stop_hit"]:
             stop_hits.append(result)
         elif result["triggered"]:
