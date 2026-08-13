@@ -17,6 +17,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import prices
 import zacks_import
@@ -47,6 +48,24 @@ def load_opportunities_b() -> dict:
     if not OUTPUT_FILE.exists():
         return {"generated_at": None, "list": []}
     return json.loads(OUTPUT_FILE.read_text())
+
+
+def in_universe(ticker: str) -> bool:
+    """Whether this ticker is in the S&P 500 set Opportunities B actually screens.
+    A ticker outside it can still get an on-demand score_ticker() read, but it was
+    never in the running for the published shortlist - a different situation from
+    scoring low, worth telling apart when comparing against Zacks."""
+    return ticker in load_universe()
+
+
+def shortlist_cutoff() -> Optional[float]:
+    """Lowest composite score currently making the top-N shortlist - a data-driven
+    'would this ticker make the cut today' bar. None if the shortlist hasn't been
+    built yet."""
+    lst = load_opportunities_b().get("list") or []
+    if not lst:
+        return None
+    return min(r["composite"] for r in lst)
 
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:

@@ -18,27 +18,21 @@ load_dotenv(Path(__file__).parent / ".env")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-5"
 
-SYSTEM_PROMPT = """You are a financial data analyst helping an individual investor read their own research on a single stock ticker. You will be given structured data: Zacks Rank screening metrics, analyst consensus ratings, recent earnings history, the next earnings date, recent insider trading activity, recent news headlines, and news sentiment scores.
+SYSTEM_PROMPT = """You are a financial data analyst helping an individual investor read their own research on a single stock ticker. You will be given structured data: Zacks Rank screening metrics, analyst consensus ratings, an Opportunities B score (a separate methodology built on analyst conviction and earnings-beat consistency, distinct from Zacks' estimate-revision-driven rank), recent earnings history, the next earnings date, recent insider trading activity, recent news headlines, and news sentiment scores.
 
-Write a clear, readable synthesis in prose (3-5 short paragraphs). Specifically:
-- Begin every paragraph with a short bold lead-in — 3 to 7 words that summarise that paragraph's takeaway — wrapped in double asterisks, followed by the full explanation. For example: "**Estimates rising, price lagging.** Analysts have nudged their earnings forecasts up over the past month, but the share price has drifted lower over the same stretch…". The lead-in must describe what the paragraph says, never give a recommendation.
-- Connect related data points to each other — e.g. does price momentum agree with earnings estimate revisions? Does analyst consensus align with recent insider activity? Does the Zacks Rank agree with the broader analyst consensus, or diverge?
-- Explicitly call out where signals AGREE (reinforcing a read) and where they CONFLICT (creating ambiguity) — do not paper over contradictions to produce a tidier story.
-- Note relevant risk context, such as an upcoming earnings date that could introduce volatility, or a pattern of earnings beats/misses.
-- Use the news headlines and sentiment data to describe the current narrative around the stock, not just restate the numbers.
-- If data for a category is missing or unavailable, simply omit it — do not speculate to fill the gap.
+Write a TIGHT, skimmable synthesis in prose — 3-4 paragraphs, aiming for roughly 180-250 words total (not per paragraph). This is a hard budget: pick the handful of facts that most matter and drop or fold in the rest, rather than covering every metric in the data. The reader should be able to read the whole thing in one pass, not skim past it because it's too long. Specifically:
+- Begin every paragraph with a short bold lead-in — 3 to 7 words that summarise that paragraph's takeaway — wrapped in double asterisks, followed by 2-3 sentences of support, not a full explanatory essay. For example: "**Estimates rising, price lagging.** Analysts raised earnings forecasts over the past month, but the share price drifted lower over the same stretch — the market isn't confirming the optimism yet." The lead-in must describe what the paragraph says, never give a recommendation.
+- Organize by THEME, not by data category — don't give VGM scores, Opportunities B, consensus, and insider activity each their own paragraph. Group whatever agrees into one paragraph and whatever conflicts into another; mention a metric only if it changes the reading, skip ones that just restate what's already been said.
+- Explicitly call out where signals AGREE (reinforcing a read) and where they CONFLICT (creating ambiguity) — one clear sentence each, not paragraphs of caveats. Include the Zacks-vs-Opportunities-B comparison only if it's actually informative here (they measure different things: Zacks = is estimate momentum accelerating now; Opportunities B = how strong is underlying analyst conviction and the earnings-beat record).
+- Fold in risk context (upcoming earnings date, beat/miss pattern) and the news narrative wherever they're most relevant — they don't need their own paragraph unless they're the single biggest story here.
+- If data for a category is missing, unavailable, or simply doesn't add anything new, omit it entirely — don't mention a category just to say there's nothing notable in it.
 
-Write for a smart reader who is NOT a finance professional — not a Wall Street analyst, not an accountant. Avoid dense analyst jargon and vague shorthand phrases. Every time you use a technical term (earnings surprise, estimate revision, trailing vs. projected growth, VGM/Value/Growth/Momentum score, consensus rating, EPS, basis point, "price action," etc.), briefly explain what it actually means in plain words, in the same sentence or the next one — don't assume it's already understood, and don't just swap one piece of jargon for another.
+Write for a smart reader who is NOT a finance professional. Avoid dense analyst jargon and vague shorthand phrases. The first time (and only the first time) you use a technical term (earnings surprise, estimate revision, trailing vs. projected growth, VGM score, consensus rating, EPS, "price action," etc.) in the whole response, gloss it in a short parenthetical of a few words — not a full explanatory sentence — then use the term freely afterward.
 
-Be EXPLICIT and CONCRETE, never vague or metaphorical. Two rules:
-- Prefer plain explicit phrasing over vague verbs: write "most of the recent news coverage" rather than "news lean"; "the share price" rather than "price action".
-- Whenever you say a signal is mixed, has "cross-currents", or is "not all good", you MUST immediately name the SPECIFIC concern instead of leaving it abstract — say *what* the negative stories or conflicts actually are.
-
-Three examples of the rewrite expected:
-- Instead of "a strong trailing earnings growth figure," write "profits have grown a lot over the past year (up X%), which is unusually fast — this describes what already happened, not a forecast."
-- Instead of "price action is choppy and doesn't confirm the bullish rank," write something like "the stock's price has been bouncing up and down without a clear direction lately, which doesn't really back up the bullish signal from the rank — if the rank were right, you'd more likely expect the price to be climbing steadily instead."
-- Instead of "news sentiment is net positive but carries real cross-currents," write "most of the recent news coverage is more positive than negative. The main concerns showing up are [name them specifically — e.g. a downgrade from one bank, a lawsuit over X, or slowing sales in Y]."
-Be precise about whether a growth/estimate number is historical (already happened) or projected (a forecast) — always make that fact obvious, since conflating the two is a common and misleading mistake.
+Be EXPLICIT and CONCRETE, never vague or metaphorical, but SHORT about it:
+- Prefer plain phrasing over vague verbs: "the share price" not "price action"; "most recent news coverage" not "news lean."
+- Whenever you say a signal is mixed or "not all good," name the SPECIFIC concern in the same sentence — don't leave it abstract, and don't spend a second sentence explaining it further than needed.
+- Be clear whether a growth/estimate number is historical (already happened) or projected (a forecast) — a few words is enough ("up 12% over the past year" vs. "forecast to grow 12%"), don't over-explain the distinction every time.
 
 Strict rules, do not violate these under any framing:
 - Never tell the user whether to buy, sell, or hold. Do not use directive language like "recommend," "should buy," "should sell," "a good entry point," etc.
@@ -137,6 +131,39 @@ def derive_signals(data: dict) -> dict:
                 f"({m['surprise_percent']:.1f}%) — a recent stumble under an otherwise positive read."
             )
 
+    ob = data.get("opportunities_b") or {}
+    ob_score = ob.get("score")
+    ob_composite = ob_score.get("composite") if ob_score else None
+    ob_cutoff = ob.get("shortlist_cutoff")
+    ob_in_universe = ob.get("in_sp500_universe")
+    universe_note = (
+        "" if ob_in_universe
+        else " — note it's outside the S&P 500 set Opportunities B actually screens, "
+             "so it was never formally in the running for that list; this is a one-off "
+             "read using the same math, not a shortlist placement"
+    )
+
+    if ob_composite is not None and ob_cutoff is not None:
+        if bullish_rank and ob_composite < ob_cutoff:
+            contradictions.append(
+                f"Conflicting signal: Zacks Rank {rank} says earnings estimates are being raised right now, but the "
+                f"Opportunities B score — a separate read based on analyst conviction (strong-buy vs. "
+                f"buy ratings) and earnings-beat consistency — comes out at {ob_composite * 100:.0f}, "
+                f"below the {ob_cutoff * 100:.0f} needed to make its current top-20 shortlist{universe_note}. "
+                f"The two methodologies weigh different evidence and disagree here: Zacks is picking up "
+                f"fresh estimate momentum that the conviction/beats lens isn't seeing."
+            )
+        elif not bullish_rank and ob_composite >= ob_cutoff:
+            rank_note = f"is ranked {rank} by Zacks" if rank is not None else "isn't on the current Zacks Rank 1 list at all"
+            contradictions.append(
+                f"Mixed signal: this ticker {rank_note}, but its Opportunities B score ({ob_composite * 100:.0f}) "
+                f"would clear the bar for the current top-20 shortlist{universe_note}. Analyst conviction and "
+                f"earnings-beat consistency look strong even though Zacks isn't currently flagging accelerating "
+                f"estimate revisions for it — the two methodologies are reading this name differently: one "
+                f"possibility is steady, already-priced-in strength that Zacks' revision-based rank wouldn't "
+                f"light up for; another is a name Zacks just hasn't caught up to yet."
+            )
+
     return {"metrics": metrics, "contradictions": contradictions}
 
 
@@ -148,6 +175,7 @@ def gather_ticker_data(ticker: str) -> dict:
     insider_transactions = _safe(prices.fetch_insider_transactions, ticker)
     news = _safe(prices.fetch_company_news, ticker)
     sentiment = _safe(alpha_vantage.fetch_news_sentiment, ticker)
+    opp_b_score = opportunities_b.score_ticker(ticker)
 
     return {
         "ticker": ticker,
@@ -158,6 +186,11 @@ def gather_ticker_data(ticker: str) -> dict:
         "insider_transactions": insider_transactions,
         "recent_news": news,
         "news_sentiment": sentiment,
+        "opportunities_b": {
+            "score": opp_b_score,
+            "in_sp500_universe": opportunities_b.in_universe(ticker),
+            "shortlist_cutoff": opportunities_b.shortlist_cutoff(),
+        },
     }
 
 
@@ -190,6 +223,6 @@ def synthesize(ticker: str) -> dict:
         "analysis": analysis,
         "data_used": data,
         "signals": derive_signals(data),
-        "opp_b_score": opportunities_b.score_ticker(ticker),
+        "opp_b_score": data["opportunities_b"]["score"],
         "sector_context": sectors.sector_context(ticker),
     }
