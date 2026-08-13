@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 import alpha_vantage
 import consensus_store
+import ls_tc
 import opportunities_b
 import prices
 import sectors
@@ -142,6 +143,7 @@ class HoldingIn(BaseModel):
     trailing_pct: Optional[float] = None
     current_price: Optional[float] = None
     exit_plan: ExitPlan = "hold"
+    isin: Optional[str] = None
 
 
 class HoldingUpdate(BaseModel):
@@ -154,6 +156,7 @@ class HoldingUpdate(BaseModel):
     current_price: Optional[float] = None
     exit_plan: Optional[ExitPlan] = None
     manual_price: Optional[bool] = None
+    isin: Optional[str] = None
 
 
 class LotIn(BaseModel):
@@ -236,6 +239,7 @@ def create_holding(holding: HoldingIn):
         "previous_consensus_avg": None,
         "day_change_pct": None,
         "manual_price": False,
+        "isin": holding.isin.strip().upper() if holding.isin else None,
     }
     recompute_aggregates(new_holding)
     holdings.append(new_holding)
@@ -302,6 +306,9 @@ def update_holding(holding_id: str, update: HoldingUpdate):
     lots = holding.get("lots") or []
     if lot_fields and len(lots) == 1:
         lots[0].update(lot_fields)
+
+    if "isin" in changes and changes["isin"]:
+        changes["isin"] = changes["isin"].strip().upper()
 
     for key, value in changes.items():
         holding[key] = value
@@ -597,6 +604,27 @@ def update_price(holding: dict, new_price: float) -> None:
     holding["current_price"] = new_price
 
 
+def apply_ls_tc_price(holding: dict) -> bool:
+    """If this holding has an ISIN, price it directly from Lang & Schwarz
+    (ls-tc.de) — the actual EUR price Trade Republic trades against — instead
+    of the Finnhub-based anchor/roll-forward approximation in apply_quote.
+    Both current_price and day_change_pct come from ls-tc.de itself, so no
+    anchor bookkeeping is needed (it's already the real price, not something
+    to correct). Returns True if applied; False (no ISIN, or the fetch failed)
+    means the caller should fall back to the existing Finnhub-based path. See
+    ls_tc.py and CLAUDE.md."""
+    isin = holding.get("isin")
+    if not isin:
+        return False
+    try:
+        quote = ls_tc.fetch_price(isin)
+    except ls_tc.LsTcError:
+        return False
+    holding["day_change_pct"] = quote["day_change_pct"]
+    update_price(holding, quote["price"])
+    for k in ("price_anchor", "anchor_fx_rate", "anchor_previous_close_usd"):
+        holding.pop(k, None)
+    return True
 
 
 def update_consensus(holding: dict, entry: dict) -> None:
@@ -692,6 +720,14 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
     holdings = load_holdings()
     holding = find_holding(holdings, holding_id)
 
+    if apply_ls_tc_price(holding):
+        try:
+            update_consensus(holding, consensus_store.refresh(holding["ticker"]))
+        except PriceError:
+            pass
+        save_holdings(holdings)
+        return evaluate_trailing(holding, holding["current_price"])
+
     try:
         rate = prices.fetch_usd_to_eur_rate()
     except PriceError as e:
@@ -742,6 +778,13 @@ def refresh_all_prices():
 
     results = []
     for holding in holdings:
+        if apply_ls_tc_price(holding):
+            try:
+                update_consensus(holding, consensus_store.refresh(holding["ticker"]))
+            except PriceError:
+                pass
+            results.append(evaluate_trailing(holding, holding["current_price"]))
+            continue
         if holding.get("manual_price"):
             # See refresh_holding_price: the absolute fetched price is never usable
             # for these, but day_change_pct still is. Keep the price frozen if even
