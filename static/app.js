@@ -679,6 +679,7 @@ async function render() {
         <td>
           <input id="e-price-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.current_price)}" />
           <label class="subtitle" style="display:block; margin-top:0.25rem;"><input type="checkbox" id="e-manual-${h.id}" ${h.manual_price ? "checked" : ""} /> manual price (don't auto-refresh)</label>
+          <input id="e-isin-${h.id}" type="text" placeholder="ISIN (optional, for LS price)" value="${h.isin || ""}" style="display:block; margin-top:0.25rem; width:100%;" />
         </td>
         <td class="${dayChangeClass(h.day_change_pct)}">${fmtDayChangePct(h.day_change_pct)}</td>
         <td>${fmt(h.total)}</td>
@@ -702,14 +703,14 @@ async function render() {
       <td>${fmt(h.stop_price)}</td>
       <td>${fmt(h.reference_high)}</td>
       <td>${fmtPct(h.trailing_pct)}</td>
-      <td>${fmt(h.current_price)}${h.manual_price ? ' <span class="subtitle">(manual)</span>' : ""}</td>
-      <td class="${dayChangeClass(h.day_change_pct)}">${h.manual_price ? "—" : fmtDayChangePct(h.day_change_pct)}</td>
+      <td>${fmt(h.current_price)}${h.isin ? ' <span class="subtitle" title="Priced directly from Lang &amp; Schwarz via ISIN">(LS)</span>' : h.manual_price ? ' <span class="subtitle">(manual)</span>' : ""}</td>
+      <td class="${dayChangeClass(h.day_change_pct)}">${!h.isin && h.manual_price ? "—" : fmtDayChangePct(h.day_change_pct)}</td>
       <td class="${gainClass(h)} total-cell" onclick="showUnrealized('${h.id}')">${fmt(h.total)}</td>
       <td>${fmtPct(h.portfolio_pct)}</td>
       <td>${zacksCell(h)}</td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
-        ${h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
+        ${!h.isin && h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
         <button class="secondary" onclick="openLotsModal('${h.id}')">Lots</button>
         <button class="secondary" onclick="editHolding('${h.id}')">Edit</button>
         <button class="danger" onclick="sellHolding('${h.id}')">Sell</button>
@@ -754,8 +755,9 @@ async function saveEdit(id) {
   const current_price = parseEuNumber(document.getElementById(`e-price-${id}`).value);
   const exit_plan = document.getElementById(`e-exitplan-${id}`).value;
   const manual_price = document.getElementById(`e-manual-${id}`).checked;
+  const isin = document.getElementById(`e-isin-${id}`).value.trim();
 
-  const payload = { ticker, stop_price, reference_high, current_price, exit_plan, manual_price };
+  const payload = { ticker, stop_price, reference_high, current_price, exit_plan, manual_price, isin };
 
   // shares/cost/date inputs only exist for single-lot holdings; multi-lot edits its
   // shares/cost via the Lots modal instead.
@@ -790,6 +792,7 @@ async function addHolding() {
   const purchase_date = document.getElementById("f-date").value;
   const stop_price = parseEuNumber(document.getElementById("f-stop").value);
   const refRaw = document.getElementById("f-ref").value.trim();
+  const isin = document.getElementById("f-isin").value.trim();
   const exit_plan = document.getElementById("f-exit-plan").value;
 
   if (!ticker || isNaN(shares) || isNaN(cost_basis) || !purchase_date || isNaN(stop_price)) {
@@ -799,6 +802,7 @@ async function addHolding() {
 
   const payload = { ticker, shares, cost_basis, purchase_date, stop_price, exit_plan };
   if (refRaw) payload.reference_high = parseEuNumber(refRaw);
+  if (isin) payload.isin = isin;
 
   await fetch(API, {
     method: "POST",
@@ -806,7 +810,7 @@ async function addHolding() {
     body: JSON.stringify(payload),
   });
 
-  ["f-ticker", "f-shares", "f-cost", "f-date", "f-stop", "f-ref"].forEach(
+  ["f-ticker", "f-shares", "f-cost", "f-date", "f-stop", "f-ref", "f-isin"].forEach(
     (id) => (document.getElementById(id).value = "")
   );
   document.getElementById("f-exit-plan").value = "hold";
