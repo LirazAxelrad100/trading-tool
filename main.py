@@ -26,6 +26,7 @@ from prices import PriceError
 DATA_FILE = Path(__file__).parent / "data" / "holdings.json"
 SALES_HISTORY_FILE = Path(__file__).parent / "data" / "sales_history.json"
 PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.json"
+HOLDINGS_HISTORY_FILE = Path(__file__).parent / "data" / "holdings_history.json"
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
@@ -131,6 +132,31 @@ def record_portfolio_snapshot(holdings: list[dict]) -> None:
     points = [p for p in load_portfolio_history() if p["date"] != today]
     points.append({"date": today, "value": total})
     save_portfolio_history(points)
+
+
+def load_holdings_history() -> list[dict]:
+    if not HOLDINGS_HISTORY_FILE.exists():
+        return []
+    return json.loads(HOLDINGS_HISTORY_FILE.read_text())
+
+
+def save_holdings_history(points: list[dict]) -> None:
+    points.sort(key=lambda p: (p["date"], p["ticker"]))
+    HOLDINGS_HISTORY_FILE.write_text(json.dumps(points, indent=2))
+
+
+def record_holdings_snapshot(holdings: list[dict]) -> None:
+    """Upsert today's per-holding value (shares × current_price) into the history —
+    one point per ticker per day, overwriting an earlier same-day refresh. Feeds the
+    weekly-by-stock table; started 2026-08-15, so history builds up going forward only."""
+    today = date.today().isoformat()
+    points = [p for p in load_holdings_history() if p["date"] != today]
+    for h in holdings:
+        value = h["shares"] * h["current_price"]
+        if value <= 0:
+            continue
+        points.append({"date": today, "ticker": h["ticker"], "value": value})
+    save_holdings_history(points)
 
 
 class HoldingIn(BaseModel):
@@ -590,6 +616,7 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
         "day_change_pct": holding.get("day_change_pct"),
         "current_stop": stop_price,
         "suggested_new_stop": None,
+        "reset_new_stop": current_price * (1 - holding["trailing_pct"]),
         "analyst_consensus": None,
     }
     if triggered:
@@ -820,6 +847,7 @@ def refresh_all_prices():
 
     save_holdings(holdings)
     record_portfolio_snapshot(holdings)  # one portfolio-value point per day
+    record_holdings_snapshot(holdings)  # one per-holding value point per day
     return results
 
 
@@ -956,6 +984,11 @@ def refresh_opportunities_b():
 @app.get("/api/portfolio-history")
 def get_portfolio_history():
     return load_portfolio_history()
+
+
+@app.get("/api/holdings-history")
+def get_holdings_history():
+    return load_holdings_history()
 
 
 @app.post("/api/portfolio-history/seed")

@@ -117,6 +117,7 @@ def run() -> None:
 
     main.save_holdings(holdings)
     main.record_portfolio_snapshot(holdings)  # daily portfolio-value point for the chart
+    main.record_holdings_snapshot(holdings)  # daily per-holding value point for the weekly table
 
     if not breakouts and not stop_hits and not errors:
         print(f"{date.today()}: nothing to report.")
