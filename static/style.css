@@ -36,6 +36,8 @@ h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
 .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
 .panel-header h2 { margin-bottom: 0; }
 
+.weekly-table-heading { font-size: 0.95rem; margin: 1.5rem 0 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
 .tab-btn {
   background: transparent;
@@ -142,16 +144,6 @@ button.danger { background: var(--rust); }
 .sector-context .subtitle { display: block; margin-top: 0.2rem; }
 
 .sell-warn { color: var(--amber); font-size: 0.82rem; margin-top: 0.35rem; }
-
-.market-hint {
-  color: var(--amber);
-  background: rgba(224, 169, 57, 0.08);
-  border: 1px solid var(--amber);
-  border-radius: 8px;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.82rem;
-  margin-bottom: 0.75rem;
-}
 
 .total-cell { cursor: pointer; }
 .total-cell:hover { text-decoration: underline; }

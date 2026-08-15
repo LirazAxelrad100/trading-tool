@@ -46,7 +46,6 @@
         <h2>Holdings</h2>
         <button id="refresh-all-btn" onclick="refreshAllPrices()">Refresh all prices</button>
       </div>
-      <div id="market-status" class="market-hint" style="display:none;"></div>
       <div class="table-scroll">
       <table id="holdings-table">
         <thead>
@@ -81,6 +80,9 @@
         <button id="seed-portfolio-btn" class="secondary" onclick="seedPortfolioHistory()">Load past ~3 months (approx)</button>
       </div>
       <div id="portfolio-chart"><p class="empty">Loading…</p></div>
+
+      <h3 class="weekly-table-heading">Weekly value by stock</h3>
+      <div id="weekly-table-container"><p class="empty">Loading…</p></div>
     </div>
 
   </div>

@@ -5,29 +5,6 @@ async function fetchHoldings() {
   return res.json();
 }
 
-// US market hours (9:30–16:00 ET, Mon–Fri; holidays not accounted for). When closed,
-// Finnhub freezes on the last US close, so prices/Today % won't be live — flag it.
-function usMarketOpen() {
-  const et = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = et.getHours() * 60 + et.getMinutes();
-  return mins >= 9 * 60 + 30 && mins < 16 * 60;
-}
-
-// Shown as a hint after a refresh, only while the US market is closed.
-function updateMarketStatus() {
-  const el = document.getElementById("market-status");
-  if (!el) return;
-  if (usMarketOpen()) {
-    el.style.display = "none";
-    el.textContent = "";
-  } else {
-    el.textContent = "⧗ US market closed — the prices and Today % you just loaded are the last US close, not live. They'll update after US open (~15:30 CET).";
-    el.style.display = "block";
-  }
-}
-
 // Hover tooltips for the ⓘ header icons. The tooltip is position:fixed (so the
 // table's overflow container can't clip it); we place it under the icon and clamp
 // it inside the viewport on each hover.
@@ -102,6 +79,7 @@ function consensusLabel(avg) {
 
 let lastHoldings = [];
 let zacksRanks = {};
+let weeklyTableWeeksShown = 10;
 
 function zacksCell(h) {
   const entry = zacksRanks[h.ticker];
@@ -346,6 +324,102 @@ function renderPortfolioChart(points) {
       <path d="${areaPath}" fill="${color}" opacity="0.15" stroke="none"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
     </svg>`;
+}
+
+function isoWeekStart(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const day = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
+function aggregateWeekly(points) {
+  // Keeps the latest-dated point within each week (Mon-start) as that week's value.
+  const byWeek = new Map();
+  for (const p of points) {
+    const week = isoWeekStart(p.date);
+    const existing = byWeek.get(week);
+    if (!existing || p.date > existing.date) byWeek.set(week, p);
+  }
+  return byWeek;
+}
+
+async function loadWeeklyTable() {
+  const container = document.getElementById("weekly-table-container");
+  if (!container) return;
+  try {
+    const [totalRes, perStockRes] = await Promise.all([
+      fetch("/api/portfolio-history"),
+      fetch("/api/holdings-history"),
+    ]);
+    renderWeeklyTable(await totalRes.json(), await perStockRes.json());
+  } catch (e) {
+    container.innerHTML = `<p class="empty">Weekly table unavailable: ${e}</p>`;
+  }
+}
+
+function weeklyChangeClass(current, previous) {
+  if (!current || !previous) return "";
+  if (current.value > previous.value) return "price-up";
+  if (current.value < previous.value) return "price-down";
+  return "";
+}
+
+function weekRangeLabel(weekStartStr) {
+  const start = new Date(weekStartStr + "T00:00:00");
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const opts = { day: "2-digit", month: "2-digit" };
+  return `${start.toLocaleDateString("de-DE", opts)} – ${end.toLocaleDateString("de-DE", opts)}`;
+}
+
+function renderWeeklyTable(totalPoints, perStockPoints) {
+  const container = document.getElementById("weekly-table-container");
+  if (!totalPoints || totalPoints.length === 0) {
+    container.innerHTML = `<p class="empty">No history yet — builds up as you refresh each day.</p>`;
+    return;
+  }
+
+  const totalByWeek = aggregateWeekly(totalPoints);
+  const tickers = [...new Set(lastHoldings.map((h) => h.ticker))];
+  const perTickerByWeek = {};
+  for (const t of tickers) {
+    perTickerByWeek[t] = aggregateWeekly(perStockPoints.filter((p) => p.ticker === t));
+  }
+
+  const allWeeks = [...totalByWeek.keys()].sort().reverse();
+  const weeks = allWeeks.slice(0, weeklyTableWeeksShown);
+
+  let html = `<div class="table-scroll"><table class="weekly-table"><thead><tr><th>Week (Mon–Sun)</th><th>Total</th>`;
+  for (const t of tickers) html += `<th>${t}</th>`;
+  html += `</tr></thead><tbody>`;
+
+  for (let i = 0; i < weeks.length; i++) {
+    const w = weeks[i];
+    const isLatest = i === 0;
+    const prevWeek = allWeeks[i + 1];
+    const totalP = totalByWeek.get(w);
+    const totalClass = isLatest ? weeklyChangeClass(totalP, prevWeek && totalByWeek.get(prevWeek)) : "";
+    html += `<tr><td>${weekRangeLabel(w)}</td><td class="${totalClass}"><strong>${totalP ? fmt(totalP.value) : "–"}</strong></td>`;
+    for (const t of tickers) {
+      const p = perTickerByWeek[t].get(w);
+      const cellClass = isLatest ? weeklyChangeClass(p, prevWeek && perTickerByWeek[t].get(prevWeek)) : "";
+      html += `<td class="${cellClass}">${p ? fmt(p.value) : "–"}</td>`;
+    }
+    html += `</tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  if (allWeeks.length > weeklyTableWeeksShown) {
+    html += `<button class="secondary" onclick="showMoreWeeklyRows()">Show more weeks</button>`;
+  }
+  html += `<p class="subtitle">Per-stock history started 2026-08-15 — older weeks fill in with "–" until enough days accumulate.</p>`;
+  container.innerHTML = html;
+}
+
+function showMoreWeeklyRows() {
+  weeklyTableWeeksShown += 10;
+  loadWeeklyTable();
 }
 
 async function seedPortfolioHistory() {
@@ -862,6 +936,7 @@ function renderFlag(id, result) {
       <div class="line">Estimated ${gainWord}: ${fmt(result.total_gain)} · Estimated tax (26,375%): ${fmt(result.estimated_tax)}</div>
       ${consensusLine}
       <div class="actions">
+        <button class="secondary" onclick="resetTrailingStop('${id}', ${result.new_price}, ${result.reset_new_stop})">Reset trailing stop to current price</button>
         <button class="secondary" onclick="document.getElementById('flag-${id}').remove()">Dismiss</button>
       </div>
     `;
@@ -953,11 +1028,16 @@ async function refreshAllPrices() {
       renderFlag(result.id, result);
     }
     await loadPortfolioChart(); // refresh-all recorded a new daily point
-    updateMarketStatus();
+    await loadWeeklyTable();
   } finally {
     btn.disabled = false;
     btn.textContent = "Refresh all prices";
   }
+}
+
+async function resetTrailingStop(id, newReferenceHigh, newStopPrice) {
+  if (!confirm(`Reset reference high to ${fmt(newReferenceHigh)} and stop loss to ${fmt(newStopPrice)}?`)) return;
+  await confirmHolding(id, newReferenceHigh, newStopPrice);
 }
 
 async function confirmHolding(id, newReferenceHigh, newStopPrice) {
