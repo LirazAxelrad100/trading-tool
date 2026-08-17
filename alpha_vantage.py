@@ -11,13 +11,33 @@ load_dotenv(Path(__file__).parent / ".env")
 ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY")
 ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
 PRICE_HISTORY_CACHE_FILE = Path(__file__).parent / "data" / "price_history_cache.json"
+NEWS_SENTIMENT_CACHE_FILE = Path(__file__).parent / "data" / "news_sentiment_cache.json"
 
 
 class AlphaVantageError(Exception):
     pass
 
 
+def _load_news_sentiment_cache() -> dict:
+    if not NEWS_SENTIMENT_CACHE_FILE.exists():
+        return {}
+    return json.loads(NEWS_SENTIMENT_CACHE_FILE.read_text())
+
+
+def _save_news_sentiment_cache(cache: dict) -> None:
+    NEWS_SENTIMENT_CACHE_FILE.write_text(json.dumps(cache, indent=2))
+
+
 def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
+    """Cached per ticker per day, same as fetch_daily_prices — Analyze can be clicked on the
+    same ticker more than once in a day, and this shares Alpha Vantage's 25-requests/day
+    free-tier cap with price history."""
+    cache = _load_news_sentiment_cache()
+    today = date.today().isoformat()
+    cached = cache.get(ticker)
+    if cached and cached.get("fetched_date") == today:
+        return cached["result"]
+
     if not ALPHA_VANTAGE_API_KEY:
         raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
     try:
@@ -60,11 +80,14 @@ def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
             break
 
     average_score = sum(scores) / len(scores) if scores else None
-    return {
+    result = {
         "average_score": average_score,
         "article_count": len(articles),
         "articles": articles,
     }
+    cache[ticker] = {"fetched_date": today, "result": result}
+    _save_news_sentiment_cache(cache)
+    return result
 
 
 def _load_price_history_cache() -> dict:

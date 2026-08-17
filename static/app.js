@@ -600,11 +600,37 @@ function renderSectorContext(sc) {
     </div>`;
 }
 
+function renderRisk(v) {
+  if (!v || v.error) {
+    return `<div class="risk-badge"><strong>Volatility: —</strong> <span class="subtitle">${v && v.error ? v.error : "not enough price history"}</span></div>`;
+  }
+  const cls = v.label === "Low" ? "price-up" : v.label === "Very high" || v.label === "High" ? "price-down" : "";
+  return `
+    <div class="risk-badge">
+      <strong>Volatility: <span class="${cls}">${v.label}</span></strong>
+      <span class="subtitle">${fmtPct(v.annualized_pct / 100)} a year — based on how much the price has been swinging day to day over the last ${v.days_used} trading days, scaled up to a yearly figure so it's easier to compare across stocks. Looks backward only, not a prediction.</span>
+    </div>`;
+}
+
+function renderEarningsRisk(er) {
+  if (!er || !er.near_earnings) return "";
+  if (!er.triggered) {
+    return `<p class="subtitle">Earnings in ${er.days_to_earnings} day${er.days_to_earnings === 1 ? "" : "s"} — price/sentiment don't look overheated going in.</p>`;
+  }
+  return `
+    <div class="tensions">
+      <strong>⚠ Expectations running hot ahead of earnings</strong>
+      <p>Earnings in ${er.days_to_earnings} day${er.days_to_earnings === 1 ? "" : "s"}: price up ${fmtPct(er.price_move_4w / 100)} over the past 4 weeks and news sentiment reads Bullish (avg score ${er.sentiment_score.toFixed(2)}). A beat may already be priced in — historically, when expectations run this hot, even good results don't always move the price.</p>
+    </div>`;
+}
+
 function renderSignals(result) {
   const sig = result.signals || {};
   return (
     renderOppBScore(result.opp_b_score) +
     renderSectorContext(result.sector_context) +
+    renderRisk(result.volatility) +
+    renderEarningsRisk(sig.earnings_risk) +
     renderSignalsTable(sig.metrics) +
     renderContradictions(sig.contradictions)
   );
