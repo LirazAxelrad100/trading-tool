@@ -121,6 +121,7 @@ button.danger { background: var(--rust); }
 .tensions strong { color: var(--amber); font-size: 0.9rem; }
 .tensions ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 .tensions li { font-size: 0.85rem; margin: 0.3rem 0; line-height: 1.35; }
+.tensions p { font-size: 0.85rem; margin: 0.4rem 0 0; line-height: 1.35; }
 .signals-table td:first-child { color: var(--muted); white-space: nowrap; }
 
 .oppb-score {
@@ -142,6 +143,16 @@ button.danger { background: var(--rust); }
   font-size: 0.9rem;
 }
 .sector-context .subtitle { display: block; margin-top: 0.2rem; }
+
+.risk-badge {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+.risk-badge .subtitle { display: block; margin-top: 0.2rem; }
 
 .sell-warn { color: var(--amber); font-size: 0.82rem; margin-top: 0.35rem; }
 

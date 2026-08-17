@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,7 @@ import alpha_vantage
 import consensus_store
 import opportunities_b
 import prices
+import risk
 import sectors
 import zacks_import
 
@@ -49,6 +51,37 @@ def _safe(fn, *args, **kwargs):
 
 
 CONSENSUS_WEIGHTS = consensus_store.CONSENSUS_WEIGHTS
+
+# "Expectations stretched ahead of earnings" thresholds — forward-looking, not a recap of a
+# past reaction: if a stock has already rallied hard and sentiment is running hot heading into
+# its earnings date, a beat has less room to move the price (a real pattern the user flagged
+# with MU/AMD — big beats, price fell anyway). See docs/plans/roadmap.md.
+EARNINGS_WATCH_DAYS = 21          # "ahead of the print" window
+STRETCHED_RUNUP_PCT = 15          # 4-week price move considered a meaningful run-up
+BULLISH_SENTIMENT_THRESHOLD = 0.35  # Alpha Vantage's own "Bullish" cutoff (their docs' band)
+
+
+def _earnings_risk(price_move_4w, next_earnings: Optional[str], sentiment) -> dict:
+    if not next_earnings:
+        return {"triggered": False, "near_earnings": False}
+    try:
+        days_out = (date.fromisoformat(next_earnings) - date.today()).days
+    except ValueError:
+        return {"triggered": False, "near_earnings": False}
+    if not (0 <= days_out <= EARNINGS_WATCH_DAYS):
+        return {"triggered": False, "near_earnings": False}
+
+    avg_score = sentiment.get("average_score") if isinstance(sentiment, dict) else None
+    runup = isinstance(price_move_4w, (int, float)) and price_move_4w >= STRETCHED_RUNUP_PCT
+    bullish = isinstance(avg_score, (int, float)) and avg_score >= BULLISH_SENTIMENT_THRESHOLD
+
+    return {
+        "triggered": runup and bullish,
+        "near_earnings": True,
+        "days_to_earnings": days_out,
+        "price_move_4w": price_move_4w,
+        "sentiment_score": avg_score,
+    }
 
 
 def _consensus_summary(c) -> Optional[dict]:
@@ -164,7 +197,9 @@ def derive_signals(data: dict) -> dict:
                 f"light up for; another is a name Zacks just hasn't caught up to yet."
             )
 
-    return {"metrics": metrics, "contradictions": contradictions}
+    earnings_risk = _earnings_risk(p4, next_earnings, data.get("news_sentiment"))
+
+    return {"metrics": metrics, "contradictions": contradictions, "earnings_risk": earnings_risk}
 
 
 def gather_ticker_data(ticker: str) -> dict:
@@ -225,4 +260,5 @@ def synthesize(ticker: str) -> dict:
         "signals": derive_signals(data),
         "opp_b_score": data["opportunities_b"]["score"],
         "sector_context": sectors.sector_context(ticker),
+        "volatility": _safe(risk.compute_volatility, ticker),
     }
