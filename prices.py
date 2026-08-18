@@ -31,6 +31,17 @@ def us_market_open() -> bool:
     return 9 * 60 + 30 <= minutes < 16 * 60
 
 
+def is_weekend() -> bool:
+    """No exchange anywhere is open on a Saturday/Sunday, so a refresh that day has
+    nothing real to fetch — see apply_ls_tc_price/refresh endpoints in main.py,
+    which skip the fetch entirely rather than trust ls-tc.de's weekend numbers
+    (real incident 2026-08-15: ls-tc.de still returns "intraday" ticks over the
+    weekend with a stale previousDay reference, producing a fabricated non-zero
+    day_change_pct for some tickers and an exact-zero for others — neither is a
+    real Saturday price move)."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).weekday() >= 5
+
+
 def _finnhub_get(path: str, params: dict) -> dict:
     if not FINNHUB_API_KEY:
         raise PriceError("FINNHUB_API_KEY is not set in .env")

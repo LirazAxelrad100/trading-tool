@@ -747,6 +747,17 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
     holdings = load_holdings()
     holding = find_holding(holdings, holding_id)
 
+    if prices.is_weekend():
+        # No exchange is open — nothing real to fetch. Leave price/day_change_pct
+        # exactly as they were; still refresh consensus since that's not tied to
+        # market hours. See prices.is_weekend().
+        try:
+            update_consensus(holding, consensus_store.refresh(holding["ticker"]))
+            save_holdings(holdings)
+        except PriceError:
+            pass
+        return evaluate_trailing(holding, holding["current_price"])
+
     if apply_ls_tc_price(holding):
         try:
             update_consensus(holding, consensus_store.refresh(holding["ticker"]))
@@ -798,13 +809,26 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
 @app.post("/api/holdings/refresh-all")
 def refresh_all_prices():
     holdings = load_holdings()
-    try:
-        rate = prices.fetch_usd_to_eur_rate()
-    except PriceError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    weekend = prices.is_weekend()
+    rate = None
+    if not weekend:
+        try:
+            rate = prices.fetch_usd_to_eur_rate()
+        except PriceError as e:
+            raise HTTPException(status_code=502, detail=str(e))
 
     results = []
     for holding in holdings:
+        if weekend:
+            # No exchange is open — nothing real to fetch. Leave price/day_change_pct
+            # exactly as they were; still refresh consensus since that's not tied to
+            # market hours. See prices.is_weekend().
+            try:
+                update_consensus(holding, consensus_store.refresh(holding["ticker"]))
+            except PriceError:
+                pass
+            results.append(evaluate_trailing(holding, holding["current_price"]))
+            continue
         if apply_ls_tc_price(holding):
             try:
                 update_consensus(holding, consensus_store.refresh(holding["ticker"]))
