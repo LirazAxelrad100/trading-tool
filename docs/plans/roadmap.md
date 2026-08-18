@@ -12,26 +12,36 @@ descriptive only, explicitly framed as backward-looking, not a prediction. Discu
 else is worth adding; two ideas below, deliberately picked to give genuine *new* information
 rather than just re-displaying data already visible elsewhere in the tool.
 
-### In progress: earnings-reaction risk (forward-looking, not a recap)
+### Earnings-reaction risk (forward-looking, not a recap)
 Motivated by a real pattern the user noticed: recent "amazing" earnings beats (MU, AMD) were
 followed by the stock dropping anyway — a beat alone isn't a reliable green light lately.
 A flag that only reports "the last beat wasn't rewarded" *after* the fact was rejected as low
 value ("knowing the change after it happened is not worth the token of building it"). Reframed
 into two forward-looking layers:
-1. **Expectations-stretched flag, ahead of the print** — if a stock has already rallied hard
-   in the weeks before its earnings date and sentiment is running very bullish, a beat has less
-   room to move the price (arguably what happened with MU/AMD). Cheap: uses data already
-   fetched for Analyze (`price_move_4w`, `news_sentiment` average score, `next_earnings` date) —
-   no new API calls.
-2. **Per-ticker beat-to-price track record** — pull the last ~6-8 *actual* earnings report dates
-   (not just the next one) and check whether the price actually rose in the day(s) after each,
-   producing an honest stat like "beaten 4 of 4 quarters, but price rose after only 1 of those
-   4." This is a real base rate for how much weight *this specific ticker's* next beat deserves —
-   not a recap, a reliability read for a decision still ahead. Needs: Finnhub `calendar/earnings`
-   queried with a past date range for real report dates (verify free-tier access before trusting,
-   per the hard rule), plus Alpha Vantage full daily history (`outputsize=full`, one call per
-   ticker, cached — same call-count cost as today's `compact` call) to read the price move
-   around each date. Heavier build than (1); (1) can ship first as a standalone flag.
+1. **Expectations-stretched flag, ahead of the print** — ✅ BUILT (2026-08-17). If a stock has
+   already rallied hard in the weeks before its earnings date and sentiment is running very
+   bullish, a beat has less room to move the price (arguably what happened with MU/AMD). Uses
+   data already fetched for Analyze (`price_move_4w`, `news_sentiment` average score,
+   `next_earnings` date) — no new API calls. `synthesis.py`'s `_earnings_risk()`.
+2. **Per-ticker beat-to-price track record** — ❌ DROPPED (2026-08-18), blocked twice over.
+   The idea: pull the last ~6-8 *actual* earnings report dates and check whether the price
+   actually rose in the day(s) after each, producing an honest stat like "beaten 4 of 4
+   quarters, but price rose after only 1 of those 4" — a base rate for how much weight this
+   ticker's next beat deserves. Two live-tested blockers, in order:
+   - Finnhub's `calendar/earnings` **cannot** return historical report dates for a specific
+     symbol on the free tier (see the hard rule in CLAUDE.md) — pivoted to Alpha Vantage's
+     `EARNINGS` endpoint instead, which **does** work free and returns real `reportedDate`/
+     `reportedEPS`/`estimatedEPS`/`surprisePercentage`/`reportTime` per quarter (live-verified
+     2026-08-18, e.g. MU: 122 quarters back).
+   - But the earnings dates alone aren't enough — reading the price reaction around each one
+     needs *years* of daily closes, and Alpha Vantage's free tier only gives ~100 trading days
+     (`outputsize=compact`); `outputsize=full` is **premium-only** (live-tested 2026-08-18,
+     confirmed by the API's own error message). Considered Stooq as a free, no-key full-history
+     source instead (kept AV just for the earnings dates) — also a dead end: its `robots.txt`
+     disallows automated access for everyone except Googlebot/Bingbot, and its CSV download
+     endpoint now sits behind an active proof-of-work bot challenge, which we won't attempt to
+     solve. No further free/legal full-history source identified. Revisit only if a paid data
+     source ever becomes worth it for this tool, or a new free option surfaces.
 
 ### Postponed: correlation-aware concentration / stress view
 The user already sees per-stock concentration clearly (the % Portfolio column — WDC + PLTR
@@ -44,7 +54,8 @@ a grounded stress scenario becomes meaningful — "if AI-linked names as a group
 the portfolio would move roughly X%" — because it's based on the portfolio's actual correlated
 exposure, not a generic what-if. Purely descriptive/scenario math, no recommendation attached
 (the "what to do about it" stays the user's call, per the no-directive-advice hard rule).
-Deferred behind the earnings-reaction work above.
+The earnings-reaction work above is now resolved (one piece shipped, the other dropped), so
+this is next up whenever risk-assessment work resumes.
 
 ## Data-source research (July 2026)
 
