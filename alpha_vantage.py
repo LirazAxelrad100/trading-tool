@@ -101,8 +101,13 @@ def _save_price_history_cache(cache: dict) -> None:
 
 
 def fetch_daily_prices(ticker: str, days: int = 30) -> list:
-    """Daily closes for a ticker, oldest first, in USD. Cached per ticker per day
-    since this shares Alpha Vantage's 25-requests/day free-tier cap with sentiment."""
+    """Daily OHLCV bars for a ticker, oldest first, in USD. Cached per ticker per day
+    since this shares Alpha Vantage's 25-requests/day free-tier cap with sentiment.
+
+    Alpha Vantage returns open/high/low/volume in the same response as the close, so
+    keeping them costs no extra call — momentum.py reads them for burst signals. Entries
+    cached earlier under the close-only format have no OHLC keys; callers that need them
+    must degrade rather than assume (self-heals on the next day's refetch)."""
     cache = _load_price_history_cache()
     today = date.today().isoformat()
     cached = cache.get(ticker)
@@ -133,7 +138,17 @@ def fetch_daily_prices(ticker: str, days: int = 30) -> list:
         raise AlphaVantageError(f"Alpha Vantage did not return price history for '{ticker}': {message}")
 
     prices = sorted(
-        ({"date": d, "close": float(row["4. close"])} for d, row in series.items()),
+        (
+            {
+                "date": d,
+                "open": float(row["1. open"]),
+                "high": float(row["2. high"]),
+                "low": float(row["3. low"]),
+                "close": float(row["4. close"]),
+                "volume": float(row["5. volume"]),
+            }
+            for d, row in series.items()
+        ),
         key=lambda r: r["date"],
     )
 

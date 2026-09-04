@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 import alpha_vantage
 import consensus_store
+import momentum
 import opportunities_b
 import prices
 import risk
@@ -95,7 +96,7 @@ def _consensus_summary(c) -> Optional[dict]:
     return {**counts, "n": n, "average": avg}
 
 
-def derive_signals(data: dict) -> dict:
+def derive_signals(data: dict, momentum_data: Optional[dict] = None) -> dict:
     """Pull the key facts into a flat metrics dict and flag where signals CONTRADICT
     each other. Deterministic rules, not the LLM — reliable, free, and (crucially) purely
     descriptive: they surface tension for the user to weigh, never a buy/sell/'better' verdict.
@@ -145,11 +146,13 @@ def derive_signals(data: dict) -> dict:
             f"Zacks Rank {rank} says earnings estimates are being raised, but the VGM grade is {vgm} "
             f"(Value {value}, Growth {growth}) — strong estimate momentum sitting on a weak value/growth profile."
         )
+    flagged_price_lag = False
     if bullish_rank and is_num(p4) and p4 <= -10:
         contradictions.append(
             f"The rank and analyst view are bullish, but the price is down {p4:.1f}% over the last 4 weeks — "
             f"the market isn't confirming that optimism yet."
         )
+        flagged_price_lag = True
     elif is_num(eps4) and eps4 > 0 and is_num(p4) and p4 < 0:
         contradictions.append(
             f"Analysts raised earnings estimates (+{eps4:.1f}% in 4 weeks) while the price fell {p4:.1f}% — "
@@ -196,6 +199,38 @@ def derive_signals(data: dict) -> dict:
                 f"possibility is steady, already-priced-in strength that Zacks' revision-based rank wouldn't "
                 f"light up for; another is a name Zacks just hasn't caught up to yet."
             )
+
+    # Trend/momentum tensions. The rank-vs-price check above only looks 4 weeks back, so a
+    # slower slide slips past it — real case (STRL, 2026-09-04): Zacks Rank 1 and a 1.63
+    # analyst consensus while the stock sat 52% below its June high, because the fall was
+    # spread over three months rather than four weeks.
+    md = momentum_data if isinstance(momentum_data, dict) and not momentum_data.get("error") else {}
+    ret_3m = md.get("ret_3m_pct")
+    cons_avg = cons.get("average") if isinstance(cons, dict) else None
+    bullish_cons = is_num(cons_avg) and cons_avg <= 2.0
+    well_rated = bullish_rank or bullish_cons
+
+    if well_rated and not flagged_price_lag and is_num(ret_3m) and ret_3m <= -20:
+        rating_bits = []
+        if bullish_rank:
+            rating_bits.append(f"Zacks Rank {rank}")
+        if bullish_cons:
+            rating_bits.append(f"an analyst consensus of {cons_avg:.2f} on a 1-5 scale")
+        contradictions.append(
+            f"Conflicting signal: the ratings are positive ({' and '.join(rating_bits)}), but the price is "
+            f"down {abs(ret_3m):.0f}% over the last 3 months. A decline that size spread over months rather "
+            f"than weeks doesn't show up in the 4-week price check, so the ratings and the actual price "
+            f"performance have been pointing opposite ways for a while."
+        )
+
+    if md.get("state") == "burst" and md.get("trend") == "downtrend":
+        pfh = md.get("pct_from_52w_high")
+        where = f", still {abs(pfh):.0f}% below its 52-week high" if is_num(pfh) else ""
+        contradictions.append(
+            f"Mixed signal: the sharp rise flagged in the momentum badge is happening inside a downtrend{where}. "
+            f"A jump like this in a falling stock is a bounce rather than a breakout — a distinction the "
+            f"momentum method itself draws, since its setups assume a stock already trending up."
+        )
 
     earnings_risk = _earnings_risk(p4, next_earnings, data.get("news_sentiment"))
 
@@ -248,6 +283,10 @@ def synthesize(ticker: str) -> dict:
             }
         ],
     )
+    # Finnhub metrics supply only the trend context; a failure there degrades the badge to
+    # "no trend context" rather than losing the momentum reading entirely.
+    mom = _safe(momentum.from_daily_bars, ticker, metrics=_safe(prices.fetch_metrics, ticker))
+
     text_blocks = [block.text for block in message.content if block.type == "text"]
     if not text_blocks:
         raise RuntimeError(f"Claude returned no text content for '{ticker}' (content types: {[b.type for b in message.content]})")
@@ -257,8 +296,9 @@ def synthesize(ticker: str) -> dict:
         "ticker": ticker,
         "analysis": analysis,
         "data_used": data,
-        "signals": derive_signals(data),
+        "signals": derive_signals(data, mom),
         "opp_b_score": data["opportunities_b"]["score"],
         "sector_context": sectors.sector_context(ticker),
         "volatility": _safe(risk.compute_volatility, ticker),
+        "momentum": mom,
     }

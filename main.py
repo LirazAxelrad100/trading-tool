@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import alpha_vantage
 import consensus_store
 import ls_tc
+import momentum
 import opportunities_b
 import prices
 import sectors
@@ -484,18 +485,23 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
     only piece that must succeed (raises PriceError, since an unpriceable ticker is
     almost certainly a typo) — the rest degrade to None rather than blocking add/refresh,
     same spirit as synthesis.py's _safe()."""
-    quote = prices.fetch_quote(ticker, rate)
+    shape = prices.fetch_quote_shape(ticker)
     data = {
-        "current_price": quote["price"],
+        "current_price": shape["close"] * rate,
         "move_1w": None,
         "move_3m": None,
         "score": None,
         "consensus": None,
+        "momentum": None,
         "last_refreshed": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        returns = prices.fetch_price_returns(ticker)
+        metrics = prices.fetch_metrics(ticker)
+        returns = prices.returns_from_metrics(metrics)
         data["move_1w"], data["move_3m"] = returns["move_1w"], returns["move_3m"]
+        # Both inputs come from calls this refresh already makes, so scanning the whole
+        # watchlist for burst signals costs no extra API budget.
+        data["momentum"] = momentum.from_finnhub(shape, metrics)
     except PriceError:
         pass
     try:

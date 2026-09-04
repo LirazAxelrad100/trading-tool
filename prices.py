@@ -109,12 +109,41 @@ def fetch_industry(ticker: str) -> Optional[str]:
     return (data or {}).get("finnhubIndustry")
 
 
+def fetch_metrics(ticker: str) -> dict:
+    """Finnhub's free `stock/metric` bundle for one ticker. Returned raw so a caller
+    needing several fields (trailing returns *and* momentum inputs) spends one call
+    rather than one per field."""
+    data = _finnhub_get("stock/metric", {"symbol": ticker, "metric": "all"})
+    return (data or {}).get("metric", {})
+
+
+def returns_from_metrics(m: dict) -> dict:
+    """5-day (~1 week) and 13-week (~3 months) trailing returns, in percent."""
+    return {"move_1w": m.get("5DayPriceReturnDaily"), "move_3m": m.get("13WeekPriceReturnDaily")}
+
+
 def fetch_price_returns(ticker: str) -> dict:
     """Pre-computed trailing price returns (percent) from Finnhub's free metrics —
     5-day (~1 week) and 13-week (~3 months). One call, no daily-price history needed."""
-    data = _finnhub_get("stock/metric", {"symbol": ticker, "metric": "all"})
-    m = (data or {}).get("metric", {})
-    return {"move_1w": m.get("5DayPriceReturnDaily"), "move_3m": m.get("13WeekPriceReturnDaily")}
+    return returns_from_metrics(fetch_metrics(ticker))
+
+
+def fetch_quote_shape(ticker: str) -> dict:
+    """Today's raw bar shape in USD (open/high/low/current + previous close) from the same
+    /quote call `fetch_quote` uses. Kept unconverted because momentum.py's reads are all
+    ratios within the bar — where the FX rate cancels out — and one of them (the dollar
+    breakout) is defined in USD terms anyway."""
+    data = _finnhub_get("quote", {"symbol": ticker})
+    if not data.get("c"):
+        raise PriceError(f"No price found for ticker '{ticker}'")
+    return {
+        "open": data.get("o"),
+        "high": data.get("h"),
+        "low": data.get("l"),
+        "close": data.get("c"),
+        "prev_close": data.get("pc"),
+        "day_change_pct": data.get("dp"),
+    }
 
 
 def fetch_recommendation_history(ticker: str, limit: int = 4) -> list:
