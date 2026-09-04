@@ -17,6 +17,11 @@ Fill in `.env`:
 - `ANTHROPIC_API_KEY` — for the Analyze/Compare synthesis feature. Pay-as-you-go, from [platform.claude.com](https://platform.claude.com) (Settings → Billing to add credit, then API Keys to create one — recommend a real expiry like 30 days, not "Never," per the console's own guidance).
 - `ALPHA_VANTAGE_API_KEY` — for news sentiment in the synthesis feature. Free, from [alphavantage.co](https://www.alphavantage.co/support/#api-key).
 
+**Your data never goes into git.** Everything under `data/` is ignored — real holdings,
+watchlist, sales history, portfolio value history, and the API caches — so a clone starts
+empty and you add your own positions through the UI. `data/holdings.example.json` documents
+the schema; `data/sp500.json` is bundled reference data the Opportunities B screen needs.
+
 ## Run it
 
 ```bash

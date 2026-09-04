@@ -44,6 +44,10 @@ CAPITAL_GAINS_TAX_RATE = 0.26375
 
 
 def load_holdings() -> list[dict]:
+    # data/ is untracked (real positions stay off git), so a fresh clone starts empty rather
+    # than crashing. See data/holdings.example.json for the shape.
+    if not DATA_FILE.exists():
+        return []
     holdings = json.loads(DATA_FILE.read_text())
     migrated = False
     for h in holdings:
