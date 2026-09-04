@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit(*.py)",
+      "Edit(static/**)",
+      "Edit(docs/**)",
+      "Write(*.py)",
+      "Write(static/**)",
+      "Write(docs/**)",
+      "Bash(git status *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git diff)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch)",
+      "Bash(git remote -v)",
+      "Bash(launchctl list *)",
+      "Bash(launchctl kickstart -k gui/501/com.tradingtool.webserver)",
+      "Bash(curl -s http://127.0.0.1:8000*)",
+      "Bash(node --check *)",
+      "Bash(./venv/bin/python -c *)",
+      "Bash(./venv/bin/python -m json.tool*)",
+      "Bash(ls *)",
+      "Bash(wc -l *)",
+      "Bash(grep *)",
+      "Bash(rg *)"
+    ],
+    "ask": [
+      "Edit(data/**)",
+      "Write(data/**)",
+      "Edit(.env)",
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(git filter-repo*)",
+      "Bash(./venv/bin/git-filter-repo*)",
+      "Bash(./venv/bin/python notifier.py*)",
+      "Bash(./venv/bin/python daily_check.py*)",
+      "Bash(./venv/bin/pip install*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Read(.env)"
+    ]
+  }
+}
