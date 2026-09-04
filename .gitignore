@@ -2,3 +2,11 @@ venv/
 .env
 __pycache__/
 *.log
+
+# Real portfolio data stays off git entirely — holdings, watchlist, sales history, value
+# history, and the API caches (ls_tc_cache.json included: its ISIN keys reveal holdings).
+# Tracked exceptions: the *.example.json schema samples, and sp500.json, which is bundled
+# reference data Opportunities B needs (Finnhub's constituent endpoint is paywalled).
+data/*
+!data/*.example.json
+!data/sp500.json

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "ticker": "EXMPL",
+    "shares": 12.5,
+    "cost_basis": 100.0,
+    "purchase_date": "2026-01-15",
+    "stop_price": 104.0,
+    "reference_high": 130.0,
+    "trailing_pct": 0.2,
+    "current_price": 118.0,
+    "exit_plan": "Example holding — this file documents the schema. Real positions live in holdings.json, which is untracked.",
+    "previous_price": 116.5,
+    "day_change_pct": 0.0129,
+    "manual_price": false,
+    "isin": "US0000000000",
+    "lots": [
+      { "shares": 8.0, "cost_basis": 95.0, "purchase_date": "2026-01-15" },
+      { "shares": 4.5, "cost_basis": 108.89, "purchase_date": "2026-03-02" }
+    ]
+  }
+]
