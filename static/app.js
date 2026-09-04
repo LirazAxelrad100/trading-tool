@@ -615,6 +615,61 @@ function renderRisk(v) {
     </div>`;
 }
 
+function renderMomentum(m) {
+  if (!m || m.error) {
+    return `<div class="risk-badge"><strong>Momentum: —</strong> <span class="subtitle">${m && m.error ? m.error : "no recent price data"}</span></div>`;
+  }
+  const LABELS = {
+    burst: "Sharp move up today",
+    extended: "Already extended",
+    "sharp drop": "Sharp fall today",
+    quiet: "No burst signal",
+  };
+  let label = LABELS[m.state] || "No burst signal";
+  let cls = m.state === "burst" ? "price-up" : m.state === "quiet" ? "" : "price-down";
+  if (m.state === "burst" && m.trend === "downtrend") {
+    label = "Bounce inside a downtrend";
+    cls = "price-down";
+  } else if (m.state === "burst" && m.trend === "uptrend") {
+    label = "Sharp move up, in an uptrend";
+  }
+
+  const facts = [];
+  if (m.day_change_pct != null) facts.push(`today ${fmtPct(m.day_change_pct / 100)}`);
+  if (m.run_up_5d_pct != null) facts.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
+  if (m.volume_ratio != null) facts.push(`volume ${fmt(m.volume_ratio)}× the 50-day average`);
+  if (m.volume_elevation != null) facts.push(`10-day volume ${fmt(m.volume_elevation)}× the 3-month average`);
+  if (m.close_location != null)
+    facts.push(`closed ${Math.round(m.close_location * 100)}% up the day's range`);
+  if (m.range_expansion) facts.push("widest daily range in 4 days");
+  if (m.pct_from_52w_high != null) facts.push(`${fmtPct(m.pct_from_52w_high / 100)} from its 52-week high`);
+
+  const NOTES = {
+    extended:
+      "A move this size in a week means much of it has already happened — the question is whether you'd be arriving early or late, not whether it's rising.",
+    burst:
+      "A sharp up-day on heavier-than-usual volume. That describes what just happened, not what happens next.",
+    "sharp drop":
+      "A sharp fall today. Worth knowing why before reading anything else here — a drop can follow news that changes the picture entirely.",
+    quiet: "Nothing unusual in the recent price or volume — trading in its normal range.",
+  };
+  let note = NOTES[m.state] || NOTES.quiet;
+  if (m.state === "burst" && m.trend === "downtrend") {
+    note =
+      "A sharp up-day, but the stock is falling over the longer run — so this is a bounce within a decline rather than a fresh breakout. The two are easy to confuse on a single green day.";
+  } else if (m.state === "burst" && m.trend === "uptrend") {
+    note =
+      "A sharp up-day in a stock that was already climbing and trades near its 52-week high. That describes what just happened, not what happens next.";
+  }
+
+  const asOf = m.as_of ? ` <span class="subtitle">(bars through ${m.as_of})</span>` : "";
+  return `
+    <div class="risk-badge">
+      <strong>Momentum: <span class="${cls}">${label}</span></strong>${asOf}
+      <span class="subtitle">${facts.join(" · ")}. ${note}</span>
+    </div>`;
+}
+
 function renderEarningsRisk(er) {
   if (!er || !er.near_earnings) return "";
   if (!er.triggered) {
@@ -633,6 +688,7 @@ function renderSignals(result) {
     renderOppBScore(result.opp_b_score) +
     renderSectorContext(result.sector_context) +
     renderRisk(result.volatility) +
+    renderMomentum(result.momentum) +
     renderEarningsRisk(sig.earnings_risk) +
     renderSignalsTable(sig.metrics) +
     renderContradictions(sig.contradictions)
@@ -1116,7 +1172,36 @@ function watchSortBy(field) {
 function watchSortValue(w, field) {
   if (field === "score") return w.score ? w.score.composite : null;
   if (field === "ticker") return w.ticker.toLowerCase();
+  // Sorts bursting names to one end and extended ones to the other, with quiet in between.
+  if (field === "momentum") return w.momentum ? MOMENTUM_SORT_RANK[w.momentum.state] ?? null : null;
   return w[field];
+}
+
+const MOMENTUM_SORT_RANK = { burst: 3, extended: 2, quiet: 1, "sharp drop": 0 };
+
+function momentumCell(m) {
+  if (!m || !m.state) return "—";
+  const bits = [];
+  if (m.day_change_pct != null) bits.push(`today ${fmtPct(m.day_change_pct / 100)}`);
+  if (m.run_up_5d_pct != null) bits.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
+  if (m.ret_3m_pct != null) bits.push(`3 months ${fmtPct(m.ret_3m_pct / 100)}`);
+  if (m.close_location != null) bits.push(`closed ${Math.round(m.close_location * 100)}% up the day's range`);
+  if (m.volume_elevation != null) bits.push(`10-day volume ${fmt(m.volume_elevation)}× the 3-month average`);
+  if (m.pct_from_52w_high != null) bits.push(`${fmtPct(m.pct_from_52w_high / 100)} from 52-week high`);
+  const title = bits.join(" · ");
+
+  if (m.state === "burst") {
+    // A burst inside a downtrend is a bounce, not a breakout — labelling both "Burst" was
+    // the gap that made STRL (+5% today, 52% below its June high) read as pure good news.
+    if (m.trend === "downtrend") return `<span class="price-down" title="${title}">Bounce ↓trend</span>`;
+    if (m.trend === "uptrend") return `<span class="price-up" title="${title}">Burst ↑trend</span>`;
+    return `<span class="price-up" title="${title}">Burst</span>`;
+  }
+  if (m.state === "extended") return `<span class="price-down" title="${title}">Extended</span>`;
+  if (m.state === "sharp drop") return `<span class="price-down" title="${title}">Sharp drop</span>`;
+  // "Quiet" is a real result, not missing data — a bare dash here would be indistinguishable
+  // from a row that has never been refreshed.
+  return `<span class="subtitle" title="${title}">quiet</span>`;
 }
 
 function renderWatchlist() {
@@ -1139,7 +1224,7 @@ function renderWatchlist() {
     });
   }
 
-  for (const field of ["ticker", "score", "move_1w", "move_3m"]) {
+  for (const field of ["ticker", "score", "move_1w", "move_3m", "momentum"]) {
     const el = document.getElementById(`watch-arrow-${field}`);
     if (!el) continue;
     el.textContent = field === watchSortField ? (watchSortDir === 1 ? "▲" : "▼") : "";
@@ -1155,8 +1240,9 @@ function renderWatchlist() {
       <td>${scoreText}</td>
       <td>${coloredPct(w.move_1w)}</td>
       <td>${coloredPct(w.move_3m)}</td>
+      <td>${momentumCell(w.momentum)}</td>
       <td>${zacksCell(w)}</td>
-      <td></td>
+      <td class="watch-note-cell"></td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
         <button class="secondary" onclick="refreshWatchItem('${w.id}')">Refresh</button>
@@ -1169,7 +1255,7 @@ function renderWatchlist() {
     noteInput.placeholder = "Why this ticker?";
     noteInput.value = w.note || "";
     noteInput.addEventListener("change", () => saveWatchNote(w.id, noteInput.value));
-    tr.children[7].appendChild(noteInput);
+    tr.querySelector(".watch-note-cell").appendChild(noteInput);
     body.appendChild(tr);
   }
 }

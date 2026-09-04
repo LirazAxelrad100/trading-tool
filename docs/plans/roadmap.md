@@ -57,6 +57,94 @@ exposure, not a generic what-if. Purely descriptive/scenario math, no recommenda
 The earnings-reaction work above is now resolved (one piece shipped, the other dropped), so
 this is next up whenever risk-assessment work resumes.
 
+## Momentum, themes and the recovery lens (September 2026)
+
+Context: reviewed `~/Documents/projects/claude-trading-skills` (a large set of GitHub trading
+skills) for anything worth adopting, with the stated goal "find stocks that are going up".
+Most of that library assumes a data stack this tool doesn't have (FINVIZ Elite €35/mo, FMP
+paid tier) and an active-trading posture (position sizing, Alpaca order templates) that
+conflicts with the no-directive-advice rule. Adopt *concepts*, not code.
+
+### Built this session — momentum-burst badge (`momentum.py`)
+See CLAUDE.md for the full description. Two key findings worth not relearning:
+- Alpha Vantage's `TIME_SERIES_DAILY` was already returning open/high/low/volume and
+  `fetch_daily_prices` was **discarding all but the close** — so full OHLCV momentum signals
+  cost zero extra API calls.
+- Finnhub's `/quote` + `stock/metric` (both already fetched per watchlist refresh) cover a
+  usable subset — day change, close location, 5-day run-up, 52-week distance, 10d-vs-3m volume
+  elevation — so scanning the whole Watch List is free. `/quote` has **no volume field**, which
+  is why true volume-spike and range-expansion reads need the Alpha Vantage bars.
+
+### Rejected from the skills library, with reasons
+- `breakout-trade-planner` — the risk arithmetic (entry/stop/R-multiples) is *not* advice and
+  would be safe to borrow; but the sizing multipliers (textbook 1.75× vs. developing 0×), the
+  curated "Actionable Orders" list, and `side: buy, qty: N` broker templates are. Also built
+  for many small swing trades with an Alpaca API account — the opposite of this portfolio.
+- `vcp-screener`, `canslim-screener`, `institutional-flow-tracker` — all need a paid FMP tier
+  for full-universe scans; 13F data also carries a 45-day reporting lag.
+- `theme-detector` — genuinely additive (see below), but its free mode **scrapes FINVIZ**,
+  which their ToS prohibits, and the legitimate path needs FINVIZ Elite at €35/mo.
+
+### The case for themes, proven on real holdings (2026-09-04)
+Five Watch List names — STRL, VRT, ONTO, AEHR, FN — turned out to be one AI-infrastructure bet
+held five times: all up enormously over 12 months, all down 10–52% since early June, all well
+below their 52-week highs. `sectors.py` **cannot see this**: it files STRL and VRT under
+Industrials, ONTO/AEHR under Information Technology, and returns `None` for FN. An 11-sector
+GICS view structurally splits a cross-sector theme apart. This is the concrete answer to
+"would theme detection add value over our sector view" — yes, and additive rather than a
+replacement.
+
+### Backlog, in recommended build order
+1. **Thesis capture at entry.** When adding a Watch List item, record *why* (recovery /
+   momentum / theme / income) and *what would prove it wrong*, extending the free-text note
+   that already exists. Then the tool can close the loop itself later: "added 9 Aug at $528 as
+   a recovery thesis; now $483, earnings still growing, multiple flat over 12 months." Cheap,
+   no new API calls, and it makes every later feature more useful. The existing note field
+   already proved the value — "zacks report ai bubble" explained more about STRL than any
+   metric did.
+2. **Fundamentals-vs-price panel (the recovery lens).** The tool is entirely trend-following
+   (Zacks revisions, Opportunities B conviction, momentum, sentiment) — every signal asks "is
+   this working now". A recovery thesis says "it isn't, and that's the point", so the tool will
+   structurally always look bearish on one. The missing lens is a 2×2: price up/down against
+   earnings up/down, where **price down + earnings up** is the recovery setup and **both down**
+   is the value-trap shape. Free from `stock/metric` + `stock/earnings`, both already fetched.
+   Multiple change is derivable without any paid historical-P/E data:
+   `(1 + price_return) / (1 + eps_growth) - 1`. Run on STRL over 12 months: price +59%, EPS
+   +51% → the multiple is roughly unchanged over a year, meaning the June spike to 49× was the
+   anomaly, not the fall. Honest limit: this identifies the *entry condition* for a recovery
+   thesis, never the timing — nothing can tell you a decline is over.
+3. **Concentration grouping** — "these names move together". Smaller and cheaper than full
+   theme detection, and it would have caught the five-names-one-bet problem in August. Buildable
+   from trailing returns already fetched on every watchlist refresh.
+4. **Risk preview on Watch List items** — before buying, show "at today's price with a 15% stop,
+   a full position of €X puts €Y at risk, Z% of the portfolio". This is the genuinely borrowable
+   half of `breakout-trade-planner`: arithmetic about a hypothetical, no buy/qty/conviction.
+5. **`market-breadth-analyzer`** (from the skills library) — free public CSV, no API key, one
+   fetch/day, zero per-ticker cost. Scores 0–100 whether a rally is broad or narrow. Relevant
+   because breakout setups fail disproportionately when breadth is narrow.
+6. **Static pre-trade checklist in the UI.** Decided (2026-09-04) that the *static* questions
+   belong in the tool and the *adaptive* reasoning belongs in conversation with Claude. Reason:
+   a checklist's whole value is firing at the moment of decision rather than depending on
+   remembering to open Claude Code. Adaptive questions ("this is a recovery thesis, so ask about
+   multiple compression") can't be pre-written. If these are ever LLM-generated, the prompt needs
+   `SYSTEM_PROMPT`-level discipline — a question smuggles advice easily ("have you considered the
+   multiple must reach 72×?" is a recommendation wearing a question mark).
+7. **Theme lifecycle staging** — the one thing the cheaper alternatives can't replicate: flagging
+   a theme as Emerging vs. Exhausting *before* the unwind. Needs FINVIZ Elite (€35/mo). Only
+   worth revisiting if the user decides to pay.
+
+### Known loose ends
+- `sectors.ticker_sector()` returns `None` for FN and INOD — not in `sp500.json` and the Finnhub
+  industry lookup didn't resolve them, so they have no sector context at all.
+- Finnhub's `stock/metric` can describe a **different listing** than its own `/quote`: for TSM,
+  `/quote` returns the US ADR (~$427) while the metric block returns the Taiwan listing's range
+  (52w high 2535, low 1145 TWD). `momentum._pct_from_52w_high()` guards this by rejecting a price
+  outside its own 52-week range, but other non-US-primary names may be affected elsewhere.
+- Analyze's momentum tier reads Alpha Vantage daily bars, which lag by a day, so the
+  bounce-in-a-downtrend tension fires a day late there while the Watch List (live Finnhub) sees
+  it immediately. The badge discloses this as "(bars through <date>)". Fixing it means mixing
+  today's price move with yesterday's volume figures — a real tradeoff, deliberately not taken.
+
 ## Data-source research (July 2026)
 
 Goal the user stated: better **stock ranking/evaluation** and some **sector / market view**,
