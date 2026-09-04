@@ -198,8 +198,9 @@ for reference).
 
 The single biggest accuracy gap. Today a holding stores **one average `cost_basis`**, so:
 - We can't reproduce Trade Republic's realized gains, which use **FIFO** (oldest/cheapest
-  shares sold first). Real example: a holding was partly sold — the broker's FIFO gain,
-  but our average-cost figure was materially lower. We had to hand-patch the history entry to match.
+  shares sold first). This bit on a real sale: because the oldest lot was cheaper than the
+  position's average cost, TR's FIFO gain came out materially higher than our average-cost
+  figure, and the history entry had to be hand-patched to match the broker.
 - Adding a second purchase of a held ticker has no clean home (you'd overwrite or average manually).
 
 **Design sketch:**
