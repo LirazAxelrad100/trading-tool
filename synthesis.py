@@ -54,6 +54,10 @@ def _safe(fn, *args, **kwargs):
 
 CONSENSUS_WEIGHTS = consensus_store.CONSENSUS_WEIGHTS
 
+# How far back an earnings miss still counts as a tension. Finnhub returns quarters
+# newest-first, so this is a slice from the front.
+RECENT_QUARTERS = 2
+
 # "Expectations stretched ahead of earnings" thresholds — forward-looking, not a recap of a
 # past reaction: if a stock has already rallied hard and sentiment is running hot heading into
 # its earnings date, a beat has less room to move the price (a real pattern the user flagged
@@ -159,13 +163,19 @@ def derive_signals(data: dict, momentum_data: Optional[dict] = None) -> dict:
             f"Analysts raised earnings estimates (+{eps4:.1f}% in 4 weeks) while the price fell {p4:.1f}% — "
             f"forecasts and price action are pointing opposite ways."
         )
+    # Only a miss in the last two quarters is a tension. The first version scanned all four
+    # and called whatever it found "a recent stumble" — on MPC that flagged a miss from
+    # 2025-09-30, the *oldest* of the four, which had been followed by three straight beats.
+    # An improving record was being reported as a warning. Finnhub returns these newest-first.
     if bullish_rank and surprises:
-        misses = [s for s in surprises if is_num(s["surprise_percent"]) and s["surprise_percent"] < 0]
+        recent = surprises[:RECENT_QUARTERS]
+        misses = [s for s in recent if is_num(s["surprise_percent"]) and s["surprise_percent"] < 0]
         if misses:
             m = misses[0]
+            when = "its latest quarter" if m is recent[0] else f"the quarter before its latest ({m['period']})"
             contradictions.append(
-                f"The rank is bullish, but the company missed earnings estimates in {m['period']} "
-                f"({m['surprise_percent']:.1f}%) — a recent stumble under an otherwise positive read."
+                f"The rank is bullish, but the company missed earnings estimates in {when} "
+                f"({m['surprise_percent']:.1f}%)."
             )
 
     ob = data.get("opportunities_b") or {}
