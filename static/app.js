@@ -1634,6 +1634,14 @@ function sinceAddedCell(w) {
   // Rows added before entry prices were recorded show the date alone — a placeholder dash
   // just reads as a stray character next to it.
   if (!w.price_at_add || w.current_price == null) return "";
+  // Nothing to say on the day it was added: it is 0,0% by definition, and any same-day move
+  // is already the 1D column. Local date parts, not toISOString() — that converts to UTC and
+  // rolls back a day in Berlin (the bug that shifted the weekly table's dates).
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate()
+  ).padStart(2, "0")}`;
+  if (w.added_date === today) return "";
   return " " + coloredPct((w.current_price / w.price_at_add - 1) * 100);
 }
 
