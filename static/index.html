@@ -262,17 +262,32 @@
   </div>
 
   <div id="risk-modal" class="modal-overlay" onclick="if(event.target===this) closeRiskModal()">
-    <div class="modal-box">
+    <div class="modal-box modal-box-wide">
       <div class="modal-header">
         <h2 id="risk-modal-title"></h2>
         <button class="secondary" onclick="closeRiskModal()">Close</button>
       </div>
-      <p class="subtitle">If you bought this, what would be at stake? Arithmetic only — it doesn't suggest an amount.</p>
+
+      <h3 class="checklist-heading">What it would put at stake</h3>
+      <p class="subtitle">Arithmetic only — it doesn't suggest an amount.</p>
       <div class="add-form">
         <div><label>Amount to invest (EUR)</label><input id="risk-amount" type="text" inputmode="decimal" placeholder="5.000" oninput="renderRiskPreview()" /></div>
         <div><label>Stop <span id="risk-stop-hint" class="subtitle"></span></label><input id="risk-stop" type="text" inputmode="decimal" value="10" oninput="renderRiskPreview()" /></div>
       </div>
       <div id="risk-output"></div>
+
+      <h3 class="checklist-heading">What the tool already knows</h3>
+      <div id="risk-context"></div>
+
+      <h3 class="checklist-heading">What only you can answer</h3>
+      <p class="subtitle">The same three questions every time. Saved onto this watch-list item, and carried across if you buy it.</p>
+      <label class="checklist-q">Why this one — and what would tell you you're wrong?</label>
+      <textarea id="risk-why" rows="4" placeholder="e.g. Biggest EU AI-infrastructure company and the EU wants its own.&#10;Wrong if: sovereign-cloud contracts keep going to AWS/Azure EU regions."></textarea>
+      <label class="checklist-q">What are you giving up to fund it — cash you'd wanted elsewhere, or another position?</label>
+      <textarea id="risk-tradeoff" rows="2" placeholder="Optional. Money spent here isn't available for something else."></textarea>
+      <label class="checklist-q">How would you feel holding this through another summer like the last one?</label>
+      <textarea id="risk-drawdown" rows="2" placeholder="Optional. The numbers above assume you actually hold to the stop."></textarea>
+      <div class="add-form" style="margin-top:0.6rem"><button onclick="saveChecklist()">Save answers</button></div>
     </div>
   </div>
 

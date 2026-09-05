@@ -284,3 +284,15 @@ td.nowrap { white-space: nowrap; }
   line-height: 1.45;
   resize: vertical;
 }
+
+/* Pre-buy checklist. */
+.checklist-heading { margin: 1.1rem 0 0.3rem; font-size: 0.95rem; }
+.checklist-q { display: block; margin: 0.7rem 0 0.25rem; font-size: 0.88rem; color: var(--text, #dfe3ee); }
+#risk-modal textarea {
+  width: 100%; box-sizing: border-box;
+  background: var(--panel-2, #1b1f2a); border: 1px solid var(--border, #2a3040);
+  color: var(--text, #dfe3ee); border-radius: 6px; padding: 8px 10px;
+  font: inherit; line-height: 1.45; resize: vertical;
+}
+.checklist-context { margin: 0.2rem 0 0; padding-left: 1.1rem; line-height: 1.55; }
+.checklist-context li { margin-bottom: 0.3rem; }

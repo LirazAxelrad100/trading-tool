@@ -476,6 +476,9 @@ class WatchlistMetaIn(BaseModel):
     omitting a field leaves it untouched rather than blanking it."""
     source_url: Optional[str] = None
     why: Optional[str] = None
+    # Pre-buy checklist answers, kept beside the thesis they were written with.
+    tradeoff: Optional[str] = None
+    drawdown: Optional[str] = None
 
 
 def clean_source_url(url: str) -> str:
@@ -626,6 +629,10 @@ def update_watchlist_meta(item_id: str, body: WatchlistMetaIn):
         watch_item["source_url"] = clean_source_url(body.source_url)
     if body.why is not None:
         watch_item["why"] = body.why.strip()
+    if body.tradeoff is not None:
+        watch_item["tradeoff"] = body.tradeoff.strip()
+    if body.drawdown is not None:
+        watch_item["drawdown"] = body.drawdown.strip()
     save_watchlist(items)
     return watch_item
 

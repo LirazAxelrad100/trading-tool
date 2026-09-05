@@ -289,7 +289,10 @@ async function loadBreadth() {
   }
 }
 
+let lastBreadth = null;
+
 function renderBreadth(b) {
+  lastBreadth = b;
   const container = document.getElementById("breadth");
   const arrow = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
   // 50% is the natural dividing line: below it, more stocks are falling than rising against
@@ -323,7 +326,10 @@ async function loadConcentration() {
   }
 }
 
+let lastConcentration = null;
+
 function renderConcentration(c) {
+  lastConcentration = c;
   const container = document.getElementById("concentration");
   if (!c || c.error) {
     container.innerHTML = `<p class="empty">${c && c.error ? c.error : "No data yet."}</p>`;
@@ -1195,7 +1201,16 @@ function setPendingPromotion(p) {
 function promoteWatchItem(id) {
   const w = watchlist.find((x) => x.id === id);
   if (!w) return;
-  setPendingPromotion({ watchId: w.id, ticker: w.ticker, why: w.why, source_url: w.source_url });
+  // The checklist answers were written at the moment of deciding — they belong on the
+  // position, not left behind on a list entry that is about to be deleted.
+  const why = [
+    w.why,
+    w.tradeoff ? `Giving up: ${w.tradeoff}` : "",
+    w.drawdown ? `Through a drawdown: ${w.drawdown}` : "",
+  ]
+    .filter((s) => (s || "").trim())
+    .join("\n");
+  setPendingPromotion({ watchId: w.id, ticker: w.ticker, why, source_url: w.source_url });
   showTab("stocks");
   const field = document.getElementById("f-ticker");
   field.value = w.ticker;
@@ -1858,11 +1873,15 @@ function openRiskModal(id) {
   const w = watchlist.find((x) => x.id === id);
   if (!w || w.current_price == null) return;
   riskTicker = w;
-  document.getElementById("risk-modal-title").textContent = `${w.ticker} — what would this risk?`;
+  document.getElementById("risk-modal-title").textContent = `${w.ticker} — before you buy`;
   document.getElementById("risk-stop-hint").textContent = "% below your buy price — 10% on most of yours, ~22% on MU and NBIS";
   document.getElementById("risk-amount").value = "";
   document.getElementById("risk-stop").value = "10";
+  document.getElementById("risk-why").value = w.why || "";
+  document.getElementById("risk-tradeoff").value = w.tradeoff || "";
+  document.getElementById("risk-drawdown").value = w.drawdown || "";
   renderRiskPreview();
+  renderRiskContext();
   document.getElementById("risk-modal").style.display = "flex";
 }
 
@@ -1898,6 +1917,77 @@ function renderRiskPreview() {
   )} of the portfolio</td></tr>
     </tbody></table>
     <p class="subtitle">A stop doesn't guarantee that exit price — a gap down opens below it, and the loss is whatever you actually sell at. Your broker's live order is the real protection; this tool only tracks the level.</p>`;
+}
+
+// The static half of the pre-buy checklist. These three questions don't change per stock —
+// which is exactly why they belong in the interface rather than in a conversation you have to
+// remember to start. The adaptive questions ("this is a recovery thesis, so ask about the
+// multiple") can't be pre-written and stay a conversation with Claude.
+async function saveChecklist() {
+  if (!riskTicker) return;
+  const patch = {
+    why: document.getElementById("risk-why").value,
+    tradeoff: document.getElementById("risk-tradeoff").value,
+    drawdown: document.getElementById("risk-drawdown").value,
+  };
+  const res = await fetch(`/api/watchlist/${riskTicker.id}/meta`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    alert((await res.json()).detail || "Could not save.");
+    return;
+  }
+  Object.assign(riskTicker, await res.json());
+  await loadWatchlist();
+  closeRiskModal();
+}
+
+// Answers the tool can supply, so the checklist doesn't ask what it already knows. No
+// pass/fail: a tick would read as approval, and this is context, not a verdict.
+function renderRiskContext() {
+  const host = document.getElementById("risk-context");
+  if (!host || !riskTicker) return;
+  const bits = [];
+
+  const c = lastConcentration;
+  if (c && c.groups && c.groups.length) {
+    const g = c.groups[0];
+    bits.push(
+      `<li>Your holdings already include one bloc that moves together: <strong>${g.tickers.join(
+        " · "
+      )}</strong>, ${fmtPct(g.weight_pct / 100)} of the portfolio. Does ${riskTicker.ticker} belong with them?</li>`
+    );
+  }
+  const b = lastBreadth;
+  if (b) {
+    bits.push(
+      `<li>Across the market, <strong>${fmtPct(
+        b.above_50d / 100
+      )}</strong> of US stocks are above their 50-day average (${
+        b.above_50d_change < 0 ? "down" : "up"
+      } ${fmtPct(Math.abs(b.above_50d_change) / 100)} in a month).</li>`
+    );
+  }
+  // Uses move_3m rather than the momentum object — watch-list rows stopped carrying one when
+  // the Momentum column was replaced by 1D/1W/3M.
+  if (typeof riskTicker.move_3m === "number" && riskTicker.move_3m <= -20) {
+    bits.push(
+      `<li>${riskTicker.ticker} is down ${fmtPct(
+        Math.abs(riskTicker.move_3m) / 100
+      )} over 3 months — buying now is a bet on a turn, not on continuation.</li>`
+    );
+  }
+  if (riskTicker.price_at_add != null && riskTicker.current_price != null) {
+    const move = (riskTicker.current_price / riskTicker.price_at_add - 1) * 100;
+    bits.push(
+      `<li>It has moved ${coloredPct(move)} since you put it on the list on ${riskTicker.added_date}.</li>`
+    );
+  }
+  host.innerHTML = bits.length
+    ? `<ul class="checklist-context">${bits.join("")}</ul>`
+    : `<p class="subtitle">Nothing recorded yet to compare against.</p>`;
 }
 
 let thesisHoldingId = null;
