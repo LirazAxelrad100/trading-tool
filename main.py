@@ -556,8 +556,16 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
         "last_refreshed": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        returns = prices.returns_from_metrics(prices.fetch_metrics(ticker))
+        metrics = prices.fetch_metrics(ticker)
+        returns = prices.returns_from_metrics(metrics)
         data["move_1w"], data["move_3m"] = returns["move_1w"], returns["move_3m"]
+        # 12-month return and distance from the 52-week high come from the same call, and
+        # are what lets a #tag group be staged (strong for a year but unwinding now, or
+        # only just starting) without any extra requests.
+        data["move_12m"] = metrics.get("52WeekPriceReturnDaily")
+        data["off_high"] = momentum.pct_from_52w_high(
+            shape["close"], metrics.get("52WeekHigh"), metrics.get("52WeekLow")
+        )
     except PriceError:
         pass
     try:
