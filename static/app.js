@@ -706,19 +706,36 @@ function renderOppBScore(s) {
     </div>`;
 }
 
-function renderSectorContext(sc) {
+// Takes the stock's own 3-month move so it can answer the comparison rather than pose it.
+// It asked "is the stock swimming with or against its sector's tide?" while holding both
+// numbers needed to say — the same fault as the pre-buy bloc line.
+const SECTOR_GAP_PCT = 10;
+
+function renderSectorContext(sc, stock3m) {
   if (!sc) return "";
   if (sc.rank == null) {
     return `<div class="sector-context"><strong>Sector:</strong> ${sc.sector} <span class="subtitle">— sector strength not computed yet (Refresh sectors in Opportunities B)</span></div>`;
   }
   const cls = sc.standing === "leading" ? "price-up" : sc.standing === "lagging" ? "price-down" : "";
+  const sector3m = sc.ret_3m != null ? sc.ret_3m * 100 : null;
+
+  let verdict = "";
+  if (typeof stock3m === "number" && sector3m != null) {
+    const gap = stock3m - sector3m;
+    verdict =
+      Math.abs(gap) < SECTOR_GAP_PCT
+        ? ` The stock moved ${fmtPct(stock3m / 100)} over the same 3 months, roughly in line with its sector — what happened here happened across the sector.`
+        : gap < 0
+        ? ` The stock moved ${fmtPct(stock3m / 100)} over the same 3 months, far worse than its sector — so this is specific to the company rather than the sector.`
+        : ` The stock moved ${fmtPct(stock3m / 100)} over the same 3 months, well ahead of its sector — so this is specific to the company rather than the sector.`;
+  }
+
   return `
     <div class="sector-context">
       <strong>Sector:</strong> ${sc.sector} — <span class="${cls}">#${sc.rank} of ${sc.total} by 3-month momentum (${sc.standing})</span>
-      <span class="subtitle">sector 3M ${fmtPct(sc.ret_3m)} · 1M ${fmtPct(sc.ret_1m)} — is the stock swimming with or against its sector's tide?</span>
+      <span class="subtitle">sector 3M ${fmtPct(sc.ret_3m)} · 1M ${fmtPct(sc.ret_1m)}.${verdict}</span>
     </div>`;
 }
-
 function renderRisk(v) {
   if (!v || v.error) {
     return `<div class="risk-badge"><strong>Volatility: —</strong> <span class="subtitle">${v && v.error ? v.error : "not enough price history"}</span></div>`;
@@ -731,56 +748,31 @@ function renderRisk(v) {
     </div>`;
 }
 
+// One compact line. The user has twice said today's move is low value and already visible
+// elsewhere (the Watch List's 1D column), so a full explanatory paragraph was out of
+// proportion — it was crowding out the reading that actually carries the argument.
 function renderMomentum(m) {
-  if (!m || m.error) {
-    return `<div class="risk-badge"><strong>Today's momentum: —</strong> <span class="subtitle">${m && m.error ? m.error : "no recent price data"}</span></div>`;
-  }
+  if (!m || m.error) return "";
   const LABELS = {
-    burst: "Sharp move up today",
-    extended: "Already extended",
-    "sharp drop": "Sharp fall today",
-    quiet: "No burst signal",
+    burst: "sharp move up today",
+    extended: "already extended",
+    "sharp drop": "sharp fall today",
+    quiet: "nothing unusual today",
   };
-  let label = LABELS[m.state] || "No burst signal";
-  let cls = m.state === "burst" ? "price-up" : m.state === "quiet" ? "" : "price-down";
-  if (m.state === "burst" && m.trend === "downtrend") {
-    label = "Bounce inside a downtrend";
-    cls = "price-down";
-  } else if (m.state === "burst" && m.trend === "uptrend") {
-    label = "Sharp move up, in an uptrend";
-  }
+  let label = LABELS[m.state] || LABELS.quiet;
+  if (m.state === "burst" && m.trend === "downtrend") label = "up today, but inside a downtrend";
+  else if (m.state === "burst" && m.trend === "uptrend") label = "up today, in an uptrend";
+  const cls =
+    m.state === "burst" && m.trend !== "downtrend" ? "price-up" : m.state === "quiet" ? "" : "price-down";
 
   const facts = [];
   if (m.day_change_pct != null) facts.push(`today ${fmtPct(m.day_change_pct / 100)}`);
   if (m.run_up_5d_pct != null) facts.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
-  if (m.volume_elevation != null) facts.push(`10-day volume ${fmt(m.volume_elevation)}× the 3-month average`);
-  if (m.close_location != null)
-    facts.push(`closed ${Math.round(m.close_location * 100)}% up the day's range`);
-  if (m.pct_from_52w_high != null) facts.push(`${fmtPct(m.pct_from_52w_high / 100)} from its 52-week high`);
+  if (m.pct_from_52w_high != null) facts.push(`${fmtPct(m.pct_from_52w_high / 100)} from its 12-month high`);
 
-  const NOTES = {
-    extended:
-      "A move this size in a week means much of it has already happened — the question is whether you'd be arriving early or late, not whether it's rising.",
-    burst:
-      "A sharp up-day on heavier-than-usual volume. That describes what just happened, not what happens next.",
-    "sharp drop":
-      "A sharp fall today. Worth knowing why before reading anything else here — a drop can follow news that changes the picture entirely.",
-    quiet: "Nothing unusual in the recent price or volume — trading in its normal range.",
-  };
-  let note = NOTES[m.state] || NOTES.quiet;
-  if (m.state === "burst" && m.trend === "downtrend") {
-    note =
-      "A sharp up-day, but the stock is falling over the longer run — so this is a bounce within a decline rather than a fresh breakout. The two are easy to confuse on a single green day.";
-  } else if (m.state === "burst" && m.trend === "uptrend") {
-    note =
-      "A sharp up-day in a stock that was already climbing and trades near its 52-week high. That describes what just happened, not what happens next.";
-  }
-
-  return `
-    <div class="risk-badge">
-      <strong>Today's momentum: <span class="${cls}">${label}</span></strong>
-      <span class="subtitle">${facts.join(" · ")}. ${note}</span>
-    </div>`;
+  return `<p class="subtitle"><strong>Recent move:</strong> <span class="${cls}">${label}</span> — ${facts.join(
+    " · "
+  )}.</p>`;
 }
 
 // Below this the multiple hasn't meaningfully moved — the market pays about what it did.
@@ -842,10 +834,16 @@ function renderFundamentals(f) {
     if (dd != null && dd <= -25) {
       sentences.push(
         flat
-          ? `The share price is ${pct(Math.abs(dd))} below its 12-month high, so the fall mostly undid an unusually high peak.`
+          ? `The share price is ${pct(
+              Math.abs(dd)
+            )} below its 12-month high. Over the year, though, price and profits grew by similar amounts — so the price is back in line with profits, and it was the earlier high that was out of step.`
           : mc < 0
-          ? `The share price is ${pct(Math.abs(dd))} below its 12-month high — profit grew while the share got cheaper, the mismatch a recovery bet looks for.`
-          : `The share price is ${pct(Math.abs(dd))} below its 12-month high and still costs more relative to profit than a year ago.`
+          ? `The share price is ${pct(
+              Math.abs(dd)
+            )} below its 12-month high while profits grew, so the shares are cheaper relative to what the company earns than they were a year ago.`
+          : `The share price is ${pct(
+              Math.abs(dd)
+            )} below its 12-month high, yet still costs more relative to what the company earns than it did a year ago.`
       );
     } else if (!flat && mc > 0) {
       sentences.push(
@@ -890,15 +888,19 @@ function renderEarningsRisk(er) {
 
 function renderSignals(result) {
   const sig = result.signals || {};
+  // Ordered by how much each changes the reading, not by the order they were built in.
+  // Price vs. profits and the contradictions carry the actual argument; the scores, sector
+  // standing, volatility and today's move are reference. Previously everything was weighted
+  // equally, which buried the one paragraph explaining STRL beneath three lesser ones.
   return (
+    renderFundamentals(result.fundamentals) +
+    renderContradictions(sig.contradictions) +
+    renderEarningsRisk(sig.earnings_risk) +
+    renderSectorContext(result.sector_context, (result.fundamentals || {}).price_3m_pct) +
     renderOppBScore(result.opp_b_score) +
-    renderSectorContext(result.sector_context) +
     renderRisk(result.volatility) +
     renderMomentum(result.momentum) +
-    renderFundamentals(result.fundamentals) +
-    renderEarningsRisk(sig.earnings_risk) +
-    renderSignalsTable(sig.metrics) +
-    renderContradictions(sig.contradictions)
+    renderSignalsTable(sig.metrics)
   );
 }
 
