@@ -838,9 +838,13 @@ function renderFundamentals(f) {
               Math.abs(dd)
             )} below its 12-month high. Over the year, though, price and profits grew by similar amounts — so the price is back in line with profits, and it was the earlier high that was out of step.`
           : mc < 0
-          ? `The share price is ${pct(
-              Math.abs(dd)
-            )} below its 12-month high while profits grew, so the shares are cheaper relative to what the company earns than they were a year ago.`
+          ? f.eps_growth_pct >= 0
+            ? `The share price is ${pct(
+                Math.abs(dd)
+              )} below its 12-month high while profits grew, so the shares are cheaper relative to what the company earns than they were a year ago.`
+            : `The share price is ${pct(
+                Math.abs(dd)
+              )} below its 12-month high, and profits fell too — the price dropped further than profits did, so the shares are cheaper relative to earnings, but off a shrinking business.`
           : `The share price is ${pct(
               Math.abs(dd)
             )} below its 12-month high, yet still costs more relative to what the company earns than it did a year ago.`

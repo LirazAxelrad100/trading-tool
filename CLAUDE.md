@@ -59,6 +59,27 @@ Python 3.9 venv — **no `X | Y` union type syntax** (needs `Optional[X]` from `
 
 - **Refresh skips the price fetch entirely on weekends** (`prices.is_weekend()`, both `refresh_holding_price` and `refresh_all_prices` in `main.py`). Real incident (2026-08-15): ls-tc.de still returns "intraday" ticks on a Saturday/Sunday with a stale `previousDay` reference — a fabricated non-zero `day_change_pct` for some tickers, an exact-zero for others, neither a real weekend price move. Since no exchange is open at all on a weekend, there's nothing real to fetch from *any* source, not just L&S — so the guard skips price/`day_change_pct` entirely (left exactly as last set) rather than trying a fallback. Analyst consensus still refreshes, since that's not tied to market hours.
 
+## Reviewing the copy
+
+`node tools/copy_review.js` — free, reads stored data, calls nothing. Two parts:
+
+- **Per-ticker snapshot + invariance check.** Prints each ticker's rendered copy and flags any
+  line byte-identical across all of them. Per-item text that never varies is not about the
+  item — the exact fault behind "Your holdings already include one bloc…" and "is the stock
+  swimming with or against its sector's tide?", both of which read as facts about the stock.
+- **A synthetic case matrix for the badge copy.** Every branch of `renderFundamentals` side by
+  side from made-up inputs. This is where the value is: it caught a live bug on its first run
+  (the "both falling" branch said "while profits grew" when profits had fallen 15%) that no
+  current ticker would have exposed. Clicking through real data only tests the cases you
+  happen to hold.
+
+**This is not an eval, and the distinction matters.** Evals are for output you cannot predict.
+Nearly all the text in this tool is written in `app.js` and `synthesis.py`'s deterministic
+`derive_signals()` — same input, same output — so a snapshot plus a few assertions covers it at
+a fraction of the cost. Only `synthesis.py`'s LLM prose is generated, and that is the one
+surface where evals would earn their keep; the script deliberately does not touch it. A useful
+test for which is which: if you can `grep` the exact sentence in the source, a human wrote it.
+
 ## Gotchas
 
 - **`data/` is backed up daily by `backup_data.py`** (launchd `com.tradingtool.databackup`, 07:30, `RunAtLoad`) to `~/Documents/trading-tool-backups/<YYYY-MM-DD>/`, keeping the newest 30 daily snapshots (~750 KB each). This exists because git no longer holds a copy (see the next bullet) — and the irreplaceable parts can't be rebuilt from anywhere: `portfolio_history.json` and `holdings_history.json` are time series only recordable going *forward*, `holdings.json` carries `reference_high`/`trailing_pct`/`exit_plan` that the broker doesn't know, and `watchlist.json` holds the free-text notes. Restore = copy the files back into `data/`. It's Python run through the venv interpreter rather than a shell script specifically because that binary already has Full Disk Access (see the launchd gotcha below); a bash script would hit the same silent `PermissionError`. Log: `backup_data.log`.
