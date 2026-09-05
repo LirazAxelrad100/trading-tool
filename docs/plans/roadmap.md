@@ -134,7 +134,7 @@ replacement.
 6. **`market-breadth-analyzer`** ✅ BUILT (2026-09-05) as `breadth.py`, see CLAUDE.md. The skill's 6-component 0-100 composite was **not** adopted — an opaque weighted score the user would have to trust, where two plain percentages say the same thing and can be checked. Was: — free public CSV, no API key, one
    fetch/day, zero per-ticker cost. Scores 0–100 whether a rally is broad or narrow. Relevant
    because breakout setups fail disproportionately when breadth is narrow.
-7. **Static pre-trade checklist in the UI.** Decided (2026-09-04) that the *static* questions
+7. **Static pre-trade checklist in the UI.** ✅ BUILT (2026-09-05) — folded into the pre-buy modal, see CLAUDE.md. Decided (2026-09-04) that the *static* questions
    belong in the tool and the *adaptive* reasoning belongs in conversation with Claude. Reason:
    a checklist's whole value is firing at the moment of decision rather than depending on
    remembering to open Claude Code. Adaptive questions ("this is a recovery thesis, so ask about
