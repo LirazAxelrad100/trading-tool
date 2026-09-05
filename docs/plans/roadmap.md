@@ -102,7 +102,7 @@ replacement.
    no new API calls, and it makes every later feature more useful. The existing note field
    already proved the value — "zacks report ai bubble" explained more about STRL than any
    metric did.
-2. **Fundamentals-vs-price panel (the recovery lens).** The tool is entirely trend-following
+2. **Fundamentals-vs-price panel (the recovery lens).** ✅ BUILT (2026-09-05) — `fundamentals.py`, see CLAUDE.md. The design note worth keeping: the 12-month window is forced by Finnhub's TTM growth figures and is *blind on its own* — every ticker tested came out "in line" because a recent drawdown hides inside a net-positive year. Pairing the multiple change with the drawdown is what makes it informative. The tool is entirely trend-following
    (Zacks revisions, Opportunities B conviction, momentum, sentiment) — every signal asks "is
    this working now". A recovery thesis says "it isn't, and that's the point", so the tool will
    structurally always look bearish on one. The missing lens is a 2×2: price up/down against
