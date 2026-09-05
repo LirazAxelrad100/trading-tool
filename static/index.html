@@ -255,6 +255,21 @@
 
   </div>
 
+  <div id="thesis-modal" class="modal-overlay" onclick="if(event.target===this) closeThesisModal()">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="thesis-modal-title"></h2>
+        <button class="secondary" onclick="closeThesisModal()">Close</button>
+      </div>
+      <p class="subtitle">Why you own this, and what would tell you the reasoning stopped holding. A year from now the numbers will still be here — this won't be, unless you write it.</p>
+      <textarea id="thesis-why" rows="7" placeholder="Why you own it — and what would tell you you're wrong.&#10;&#10;e.g. Biggest EU AI-infrastructure company, and the EU wants to stop depending on US providers.&#10;Wrong if: EU sovereign-cloud contracts keep going to AWS/Azure EU regions instead."></textarea>
+      <div class="add-form" style="margin-top:0.6rem">
+        <div style="flex:1"><label>Source link (optional)</label><input id="thesis-url" placeholder="https://…" /></div>
+        <button onclick="saveThesis()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="lots-modal" class="modal-overlay" onclick="if(event.target===this) closeLotsModal()">
     <div class="modal-box modal-box-wide">
       <div class="modal-header">
