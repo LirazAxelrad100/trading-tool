@@ -2102,7 +2102,9 @@ async function checkOverlap() {
             Math.abs(pos.distance_pct) / 100
           )} below its own 50-day average.`;
     }
-    slot.innerHTML = `${verdict}${place}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
+    slot.innerHTML = `${verdict}${place}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days${
+      d.market_adjusted ? ", with the market's own move subtracted so this measures shared exposure rather than \"both are stocks\"" : ""
+    } — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
   } catch (e) {
     slot.innerHTML = `<span class="subtitle">Couldn't check: ${e.message || e}</span>`;
   }
