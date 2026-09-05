@@ -1250,7 +1250,23 @@ def refresh_sectors():
     return sectors.build_sector_strength()
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Serve static files with `no-cache`, so the browser revalidates every load.
+
+    Without it Chrome caches app.js heuristically and silently keeps serving an old copy
+    after an edit — which on 2026-09-05 had the user reporting a bug that had already been
+    fixed twice, since her browser was still running the previous script. `no-cache` is not
+    `no-store`: the file is still cached, but its ETag is checked each time, so an unchanged
+    file costs a 304 and nothing more. This is a local single-user tool, so that trade is
+    free; it would be the wrong default on a public site."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
