@@ -118,20 +118,30 @@ replacement.
    left — and what got built — is the **holdings** half, where it matters more (real money) and where no tags exist. Correlation also
    finds groupings that no tag would, and disproves ones that look obvious: PLTR reads as an AI position by name but moves independently.
 
-4. **Risk preview on Watch List items** — before buying, show "at today's price with a 15% stop,
+4. **Carry the `why` from Watch List to holding when you buy.** Today the two lists are entirely
+   unconnected: there is no promote/buy action at all, so buying a watched ticker means adding it
+   through the Add-holding form while the Watch List row (and its `why`, `source_url` and
+   `price_at_add`) is left behind or deleted. That loses the reasoning at exactly the moment it
+   starts mattering — the thesis was written when it was still a candidate, and the position is
+   where the money now is. Wanted: a "Bought this" action on a Watch List row that opens the Add
+   holding form pre-filled with the ticker, copies `why`/`source_url` onto the new holding, and
+   removes the Watch List entry. Keep `price_at_add` visible somewhere too — the gap between "the
+   price when I first noticed it" and "the price I paid" is worth seeing. Small, and it protects
+   the thesis capture built on 2026-09-05 rather than adding anything new.
+5. **Risk preview on Watch List items** — before buying, show "at today's price with a 15% stop,
    a full position of €X puts €Y at risk, Z% of the portfolio". This is the genuinely borrowable
    half of `breakout-trade-planner`: arithmetic about a hypothetical, no buy/qty/conviction.
-5. **`market-breadth-analyzer`** (from the skills library) — free public CSV, no API key, one
+6. **`market-breadth-analyzer`** (from the skills library) — free public CSV, no API key, one
    fetch/day, zero per-ticker cost. Scores 0–100 whether a rally is broad or narrow. Relevant
    because breakout setups fail disproportionately when breadth is narrow.
-6. **Static pre-trade checklist in the UI.** Decided (2026-09-04) that the *static* questions
+7. **Static pre-trade checklist in the UI.** Decided (2026-09-04) that the *static* questions
    belong in the tool and the *adaptive* reasoning belongs in conversation with Claude. Reason:
    a checklist's whole value is firing at the moment of decision rather than depending on
    remembering to open Claude Code. Adaptive questions ("this is a recovery thesis, so ask about
    multiple compression") can't be pre-written. If these are ever LLM-generated, the prompt needs
    `SYSTEM_PROMPT`-level discipline — a question smuggles advice easily ("have you considered the
    multiple must reach 72×?" is a recommendation wearing a question mark).
-7. **Theme lifecycle staging** — the one thing the cheaper alternatives can't replicate: flagging
+8. **Theme lifecycle staging** — the one thing the cheaper alternatives can't replicate: flagging
    a theme as Emerging vs. Exhausting *before* the unwind. Needs FINVIZ Elite (€35/mo). Only
    worth revisiting if the user decides to pay.
 
