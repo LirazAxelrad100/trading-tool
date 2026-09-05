@@ -1012,6 +1012,9 @@ async function render() {
         <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
         ${!h.isin && h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
         <button class="secondary" onclick="openLotsModal('${h.id}')">Lots</button>
+        <button class="secondary" onclick="openThesisModal('${h.id}')" title="${
+          h.why ? "Why you own this" : "Not written down yet"
+        }">Why${h.why ? " ✓" : ""}</button>
         <button class="secondary" onclick="editHolding('${h.id}')">Edit</button>
         <button class="danger" onclick="sellHolding('${h.id}')">Sell</button>
       </td>
@@ -1761,6 +1764,42 @@ function closeSellModal() {
 
 let lotsHoldingId = null;
 let editingLotIndex = null;
+
+let thesisHoldingId = null;
+
+function openThesisModal(id) {
+  const h = lastHoldings.find((x) => x.id === id);
+  if (!h) return;
+  thesisHoldingId = id;
+  document.getElementById("thesis-modal-title").textContent = `${h.ticker} — why you own it`;
+  document.getElementById("thesis-why").value = h.why || "";
+  document.getElementById("thesis-url").value = h.source_url || "";
+  document.getElementById("thesis-modal").style.display = "flex";
+}
+
+function closeThesisModal() {
+  document.getElementById("thesis-modal").style.display = "none";
+  thesisHoldingId = null;
+}
+
+async function saveThesis() {
+  if (!thesisHoldingId) return;
+  const res = await fetch(`/api/holdings/${thesisHoldingId}/thesis`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      why: document.getElementById("thesis-why").value,
+      source_url: document.getElementById("thesis-url").value.trim(),
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.detail || "Could not save.");
+    return;
+  }
+  closeThesisModal();
+  await render();
+}
 
 function openLotsModal(id) {
   const h = lastHoldings.find((x) => x.id === id);

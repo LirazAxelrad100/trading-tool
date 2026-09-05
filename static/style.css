@@ -270,3 +270,17 @@ td.nowrap { white-space: nowrap; }
 /* Compact table inside a panel (down-day behaviour). */
 .mini-table { border-collapse: collapse; margin: 0.25rem 0 0.5rem; }
 .mini-table td { padding: 2px 14px 2px 0; }
+
+/* Thesis textarea in the "why you own it" modal. */
+#thesis-why {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-2, #1b1f2a);
+  border: 1px solid var(--border, #2a3040);
+  color: var(--text, #dfe3ee);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: 1.45;
+  resize: vertical;
+}

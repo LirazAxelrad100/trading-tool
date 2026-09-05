@@ -178,6 +178,11 @@ class HoldingIn(BaseModel):
     isin: Optional[str] = None
 
 
+class ThesisIn(BaseModel):
+    why: Optional[str] = None
+    source_url: Optional[str] = None
+
+
 class HoldingUpdate(BaseModel):
     ticker: Optional[str] = None
     shares: Optional[float] = None
@@ -1083,6 +1088,23 @@ def get_portfolio_history():
 @app.get("/api/holdings-history")
 def get_holdings_history():
     return load_holdings_history()
+
+
+@app.put("/api/holdings/{holding_id}/thesis")
+def update_holding_thesis(holding_id: str, body: ThesisIn):
+    """Why this position is held, and what would show it wrong. Separate from exit_plan,
+    which says what to do at the stop — this says why it is owned at all, and it is the
+    thing that cannot be reconstructed from the numbers a year later."""
+    holdings = load_holdings()
+    holding = next((h for h in holdings if h["id"] == holding_id), None)
+    if holding is None:
+        raise HTTPException(status_code=404, detail="Holding not found.")
+    if body.why is not None:
+        holding["why"] = body.why.strip()
+    if body.source_url is not None:
+        holding["source_url"] = clean_source_url(body.source_url)
+    save_holdings(holdings)
+    return holding
 
 
 @app.get("/api/concentration")
