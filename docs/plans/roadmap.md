@@ -113,9 +113,11 @@ replacement.
    +51% → the multiple is roughly unchanged over a year, meaning the June spike to 49× was the
    anomaly, not the fall. Honest limit: this identifies the *entry condition* for a recovery
    thesis, never the timing — nothing can tell you a decline is over.
-3. **Concentration grouping** — "these names move together". Smaller and cheaper than full
-   theme detection, and it would have caught the five-names-one-bet problem in August. Buildable
-   from trailing returns already fetched on every watchlist refresh.
+3. **Concentration grouping** ✅ BUILT (2026-09-05) — `concentration.py`, see CLAUDE.md. Note the scope shift: the Watch List half
+   was solved instead by the user's own #hashtags, which beat correlation there because a tag records *why* names are related. What was
+   left — and what got built — is the **holdings** half, where it matters more (real money) and where no tags exist. Correlation also
+   finds groupings that no tag would, and disproves ones that look obvious: PLTR reads as an AI position by name but moves independently.
+
 4. **Risk preview on Watch List items** — before buying, show "at today's price with a 15% stop,
    a full position of €X puts €Y at risk, Z% of the portfolio". This is the genuinely borrowable
    half of `breakout-trade-planner`: arithmetic about a hypothetical, no buy/qty/conviction.

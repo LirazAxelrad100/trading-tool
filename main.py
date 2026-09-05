@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import alpha_vantage
+import concentration
 import consensus_store
 import ls_tc
 import momentum
@@ -1082,6 +1083,12 @@ def get_portfolio_history():
 @app.get("/api/holdings-history")
 def get_holdings_history():
     return load_holdings_history()
+
+
+@app.get("/api/concentration")
+def get_concentration():
+    """Which holdings move together. Reads only stored history, so it costs no API calls."""
+    return concentration.analyze(load_holdings(), load_holdings_history(), load_sales_history())
 
 
 @app.post("/api/portfolio-history/seed")

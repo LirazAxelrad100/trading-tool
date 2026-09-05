@@ -277,6 +277,60 @@ async function loadPriceChart(containerId, ticker) {
   }
 }
 
+async function loadConcentration() {
+  const container = document.getElementById("concentration");
+  if (!container) return;
+  try {
+    const res = await fetch("/api/concentration");
+    renderConcentration(await res.json());
+  } catch (e) {
+    container.innerHTML = `<p class="empty">Unavailable: ${e}</p>`;
+  }
+}
+
+function renderConcentration(c) {
+  const container = document.getElementById("concentration");
+  if (!c || c.error) {
+    container.innerHTML = `<p class="empty">${c && c.error ? c.error : "No data yet."}</p>`;
+    return;
+  }
+  const parts = [];
+
+  for (const g of c.groups) {
+    // A weak weakest-link means the bloc was chained together through a middle holding
+    // rather than every member moving with every other — worth saying rather than hiding.
+    const loose = g.min_correlation < 0.4;
+    parts.push(`
+      <div class="tensions">
+        <strong>${g.tickers.join(" · ")} — ${fmtPct(g.weight_pct / 100)} of the portfolio</strong>
+        <p>These have risen and fallen together over the period (average correlation ${fmt(
+          g.avg_correlation
+        )}${loose ? `, but as low as ${fmt(g.min_correlation)} for one pair` : ""}). A single piece of news that moves one is likely to move the rest, so they behave more like one position of ${fmtPct(
+      g.weight_pct / 100
+    )} than ${g.tickers.length} separate ones.</p>
+      </div>`);
+  }
+
+  if (c.independent.length) {
+    parts.push(
+      `<p><strong>Moving on their own:</strong> ${c.independent
+        .map((s) => `${s.ticker} (${fmtPct(s.weight_pct / 100)})`)
+        .join(" · ")}</p>`
+    );
+  }
+  if (c.excluded.length) {
+    parts.push(
+      `<p class="subtitle">Not included: ${c.excluded
+        .map((e) => `${e.ticker} — ${e.reason}`)
+        .join(" · ")}. Buying or selling changes a holding's recorded value without the price moving, which would look like a huge one-day swing.</p>`
+    );
+  }
+  parts.push(
+    `<p class="subtitle">Based on ${c.returns} days of recorded values (${c.from_date} to ${c.to_date}). That is a short run, so treat single pairs as tentative — a group is more trustworthy when several holdings agree. It gets steadier as more days are recorded.</p>`
+  );
+  container.innerHTML = parts.join("");
+}
+
 async function loadPortfolioChart() {
   const container = document.getElementById("portfolio-chart");
   if (!container) return;
@@ -438,6 +492,7 @@ async function seedPortfolioHistory() {
     }
     const data = await res.json();
     await loadPortfolioChart();
+    await loadConcentration();
     alert(`Added ${data.seeded} approximate past points.`);
   } finally {
     btn.disabled = false;
@@ -1183,6 +1238,7 @@ async function refreshAllPrices() {
       renderFlag(result.id, result);
     }
     await loadPortfolioChart(); // refresh-all recorded a new daily point
+    await loadConcentration();
     await loadWeeklyTable();
   } finally {
     btn.disabled = false;
@@ -1932,4 +1988,4 @@ async function removeSalesEntry(id) {
 }
 
 initInfoTooltips();
-loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart());
+loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration());
