@@ -617,7 +617,7 @@ function renderRisk(v) {
 
 function renderMomentum(m) {
   if (!m || m.error) {
-    return `<div class="risk-badge"><strong>Momentum: —</strong> <span class="subtitle">${m && m.error ? m.error : "no recent price data"}</span></div>`;
+    return `<div class="risk-badge"><strong>Today's momentum: —</strong> <span class="subtitle">${m && m.error ? m.error : "no recent price data"}</span></div>`;
   }
   const LABELS = {
     burst: "Sharp move up today",
@@ -637,11 +637,9 @@ function renderMomentum(m) {
   const facts = [];
   if (m.day_change_pct != null) facts.push(`today ${fmtPct(m.day_change_pct / 100)}`);
   if (m.run_up_5d_pct != null) facts.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
-  if (m.volume_ratio != null) facts.push(`volume ${fmt(m.volume_ratio)}× the 50-day average`);
   if (m.volume_elevation != null) facts.push(`10-day volume ${fmt(m.volume_elevation)}× the 3-month average`);
   if (m.close_location != null)
     facts.push(`closed ${Math.round(m.close_location * 100)}% up the day's range`);
-  if (m.range_expansion) facts.push("widest daily range in 4 days");
   if (m.pct_from_52w_high != null) facts.push(`${fmtPct(m.pct_from_52w_high / 100)} from its 52-week high`);
 
   const NOTES = {
@@ -662,10 +660,9 @@ function renderMomentum(m) {
       "A sharp up-day in a stock that was already climbing and trades near its 52-week high. That describes what just happened, not what happens next.";
   }
 
-  const asOf = m.as_of ? ` <span class="subtitle">(bars through ${m.as_of})</span>` : "";
   return `
     <div class="risk-badge">
-      <strong>Momentum: <span class="${cls}">${label}</span></strong>${asOf}
+      <strong>Today's momentum: <span class="${cls}">${label}</span></strong>
       <span class="subtitle">${facts.join(" · ")}. ${note}</span>
     </div>`;
 }
@@ -1213,6 +1210,7 @@ function showTab(name) {
 
 let watchlist = [];
 let watchSortField = null;
+let watchTagFilter = null;
 let watchSortDir = 1;
 
 async function loadWatchlist() {
@@ -1235,37 +1233,7 @@ function watchSortValue(w, field) {
   if (field === "score") return w.score ? w.score.composite : null;
   if (field === "ticker") return w.ticker.toLowerCase();
   // Sorts bursting names to one end and extended ones to the other, with quiet in between.
-  if (field === "momentum") return w.momentum ? MOMENTUM_SORT_RANK[w.momentum.state] ?? null : null;
-  // Empty tags sort last rather than clumping at the top as "".
-  if (field === "tag") return (w.tag || "").trim().toLowerCase() || null;
   return w[field];
-}
-
-const MOMENTUM_SORT_RANK = { burst: 3, extended: 2, quiet: 1, "sharp drop": 0 };
-
-function momentumCell(m) {
-  if (!m || !m.state) return "—";
-  const bits = [];
-  if (m.day_change_pct != null) bits.push(`today ${fmtPct(m.day_change_pct / 100)}`);
-  if (m.run_up_5d_pct != null) bits.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
-  if (m.ret_3m_pct != null) bits.push(`3 months ${fmtPct(m.ret_3m_pct / 100)}`);
-  if (m.close_location != null) bits.push(`closed ${Math.round(m.close_location * 100)}% up the day's range`);
-  if (m.volume_elevation != null) bits.push(`10-day volume ${fmt(m.volume_elevation)}× the 3-month average`);
-  if (m.pct_from_52w_high != null) bits.push(`${fmtPct(m.pct_from_52w_high / 100)} from 52-week high`);
-  const title = bits.join(" · ");
-
-  if (m.state === "burst") {
-    // A burst inside a downtrend is a bounce, not a breakout — labelling both "Burst" was
-    // the gap that made STRL (+5% today, 52% below its June high) read as pure good news.
-    if (m.trend === "downtrend") return `<span class="price-down" title="${title}">Bounce ↓trend</span>`;
-    if (m.trend === "uptrend") return `<span class="price-up" title="${title}">Burst ↑trend</span>`;
-    return `<span class="price-up" title="${title}">Burst</span>`;
-  }
-  if (m.state === "extended") return `<span class="price-down" title="${title}">Extended</span>`;
-  if (m.state === "sharp drop") return `<span class="price-down" title="${title}">Sharp drop</span>`;
-  // "Quiet" is a real result, not missing data — a bare dash here would be indistinguishable
-  // from a row that has never been refreshed.
-  return `<span class="subtitle" title="${title}">quiet</span>`;
 }
 
 function renderWatchlist() {
@@ -1274,7 +1242,9 @@ function renderWatchlist() {
   body.innerHTML = "";
   emptyMsg.style.display = watchlist.length === 0 ? "block" : "none";
 
-  const rows = [...watchlist];
+  const rows = watchTagFilter
+    ? watchlist.filter((w) => watchHashtags(w).includes(watchTagFilter))
+    : [...watchlist];
   if (watchSortField) {
     rows.sort((a, b) => {
       const av = watchSortValue(a, watchSortField);
@@ -1288,14 +1258,9 @@ function renderWatchlist() {
     });
   }
 
-  const datalist = document.getElementById("watch-tag-options");
-  if (datalist) {
-    datalist.innerHTML = watchTagOptions()
-      .map((t) => `<option value="${escapeHtml(t)}"></option>`)
-      .join("");
-  }
+  renderWatchTagFilters();
 
-  for (const field of ["ticker", "score", "move_1w", "move_3m", "momentum", "tag"]) {
+  for (const field of ["ticker", "score", "move_1d", "move_1w", "move_3m"]) {
     const el = document.getElementById(`watch-arrow-${field}`);
     if (!el) continue;
     el.textContent = field === watchSortField ? (watchSortDir === 1 ? "▲" : "▼") : "";
@@ -1313,14 +1278,13 @@ function renderWatchlist() {
             : ""
         }
       </td>
-      <td>${w.added_date}<br /><span class="subtitle">since: ${sinceAddedCell(w)}</span></td>
+      <td class="nowrap">${w.added_date} ${sinceAddedCell(w)}</td>
       <td>${w.current_price != null ? fmt(w.current_price) : "—"}</td>
       <td>${scoreText}</td>
+      <td>${coloredPct(w.move_1d)}</td>
       <td>${coloredPct(w.move_1w)}</td>
       <td>${coloredPct(w.move_3m)}</td>
-      <td>${momentumCell(w.momentum)}</td>
       <td>${zacksCell(w)}</td>
-      <td class="watch-tag-cell"></td>
       <td class="watch-note-cell"></td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
@@ -1328,21 +1292,12 @@ function renderWatchlist() {
         <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>
       </td>
     `;
-    // Built as elements rather than innerHTML so the user's own text can never be
+    // Built as an element rather than innerHTML so the user's own text can never be
     // parsed as markup.
-    const tagInput = document.createElement("input");
-    tagInput.type = "text";
-    tagInput.className = "watch-note-input";
-    tagInput.placeholder = "Source / group";
-    tagInput.setAttribute("list", "watch-tag-options");
-    tagInput.value = w.tag || "";
-    tagInput.addEventListener("change", () => saveWatchMeta(w.id, { tag: tagInput.value }));
-    tr.querySelector(".watch-tag-cell").appendChild(tagInput);
-
     const whyInput = document.createElement("input");
     whyInput.type = "text";
     whyInput.className = "watch-note-input";
-    whyInput.placeholder = "What convinced you?";
+    whyInput.placeholder = "Why — use #tags to group";
     whyInput.value = w.why || "";
     whyInput.addEventListener("change", () => saveWatchMeta(w.id, { why: whyInput.value }));
     tr.querySelector(".watch-note-cell").appendChild(whyInput);
@@ -1368,8 +1323,42 @@ async function saveWatchMeta(id, patch) {
   );
 }
 
-function watchTagOptions() {
-  return [...new Set(watchlist.map((w) => (w.tag || "").trim()).filter(Boolean))].sort();
+// Hashtags typed inside the free-text "why" are the grouping: one field to write in, and
+// a new group is created just by typing one. A separate tag column was tried first and
+// dropped — it only pays off if the wording stays consistent by hand.
+const HASHTAG_RE = /#[\p{L}\p{N}_-]+/gu;
+
+function watchHashtags(w) {
+  return ((w.why || "").match(HASHTAG_RE) || []).map((h) => h.toLowerCase());
+}
+
+function renderWatchTagFilters() {
+  const host = document.getElementById("watch-tag-filters");
+  if (!host) return;
+  const counts = new Map();
+  for (const w of watchlist) {
+    for (const h of new Set(watchHashtags(w))) counts.set(h, (counts.get(h) || 0) + 1);
+  }
+  if (counts.size === 0) {
+    host.innerHTML = `<span class="subtitle">Add #tags in the Why column to group tickers that came from the same idea.</span>`;
+    return;
+  }
+  const chips = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(
+      ([h, n]) =>
+        `<button class="tag-chip${h === watchTagFilter ? " active" : ""}" onclick="toggleWatchTagFilter('${escapeHtml(
+          h
+        )}')">${escapeHtml(h)} <span class="subtitle">${n}</span></button>`
+    );
+  host.innerHTML =
+    chips.join("") +
+    (watchTagFilter ? `<button class="tag-chip" onclick="toggleWatchTagFilter(null)">clear</button>` : "");
+}
+
+function toggleWatchTagFilter(tag) {
+  watchTagFilter = watchTagFilter === tag ? null : tag;
+  renderWatchlist();
 }
 
 function sinceAddedCell(w) {
@@ -1390,7 +1379,6 @@ function showWatchConsensus(id) {
 
 async function addWatchItem() {
   const input = document.getElementById("watch-ticker-input");
-  const tagInput = document.getElementById("watch-tag-input");
   const urlInput = document.getElementById("watch-url-input");
   const whyInput = document.getElementById("watch-why-input");
   const ticker = input.value.trim().toUpperCase();
@@ -1404,7 +1392,6 @@ async function addWatchItem() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ticker,
-        tag: tagInput.value.trim(),
         source_url: urlInput.value.trim(),
         why: whyInput.value.trim(),
       }),
@@ -1415,10 +1402,9 @@ async function addWatchItem() {
       return;
     }
     input.value = "";
-    whyInput.value = "";
     urlInput.value = "";
-    // Tag is deliberately left in place: adds come in batches from one source, so the
-    // next ticker from the same article needs no retyping.
+    // The why text is deliberately left in place: adds come in batches from one source,
+    // so the next ticker from the same article keeps its #tag without retyping.
     await loadWatchlist();
   } finally {
     btn.disabled = false;

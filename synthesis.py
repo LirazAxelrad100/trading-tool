@@ -284,12 +284,13 @@ def synthesize(ticker: str) -> dict:
             }
         ],
     )
-    # One metrics fetch serves both the momentum trend context and the fundamentals lens.
-    # A failure degrades the momentum badge to "no trend context" rather than losing the
-    # momentum reading entirely.
+    # One metrics fetch and one quote serve both the momentum read and the fundamentals
+    # lens. Momentum uses the live quote rather than Alpha Vantage daily bars so it really
+    # describes today — the bars lag a day, which made the badge say "quiet" on a ticker
+    # that was up 5% at that moment.
     metrics = _safe(prices.fetch_metrics, ticker)
-    mom = _safe(momentum.from_daily_bars, ticker, metrics=metrics)
     shape = _safe(prices.fetch_quote_shape, ticker)
+    mom = momentum.from_finnhub(shape, metrics) if not shape.get("error") else shape
     fund = fundamentals.analyze(
         metrics, data.get("earnings_history"), current_price_usd=shape.get("close")
     )

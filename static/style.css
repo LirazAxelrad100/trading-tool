@@ -251,3 +251,18 @@ th.sortable:hover { color: var(--text); }
   font-size: 0.85em;
 }
 .source-link:hover { text-decoration: underline; }
+
+/* Hashtag filter chips above the watch list. */
+.tag-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 0.75rem; }
+.tag-chip {
+  background: var(--panel-2, #1b1f2a);
+  border: 1px solid var(--border, #2a3040);
+  color: var(--text, #dfe3ee);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tag-chip:hover { border-color: var(--accent, #6b8afd); }
+.tag-chip.active { border-color: var(--accent, #6b8afd); color: var(--accent, #6b8afd); }
+td.nowrap { white-space: nowrap; }
