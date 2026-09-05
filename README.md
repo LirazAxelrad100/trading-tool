@@ -159,6 +159,25 @@ Prices for watch-list items and holdings are recorded once a day, so correlation
 - **Estimated tax doesn't account for Sparerpauschbetrag used elsewhere this year**, or losses offsetting other gains — it's a simple 26.375% on the gain portion only, meant as a quick estimate, not a filing-accurate number.
 - **Multi-lot holdings**: a stock bought across multiple purchases is entered as a single row with an averaged cost basis and one purchase date, not one row per lot. Fine for trailing-stop tracking, but will misstate the taxable gain on a partial sale, since German capital gains tax uses FIFO per lot. Deferred to the tax-lot-awareness milestone (needs a data model change: splitting the stop-tracking "holding" from a list of lots underneath it).
 
+## Checking the copy
+
+```bash
+node tools/copy_review.js
+```
+
+Prints every watch-list ticker's on-screen text in one place, plus a matrix of made-up cases
+covering each branch of the price-vs-profits wording — so you can read all the variants at once
+instead of clicking through stocks. It also flags two things automatically: a line that comes
+out identical for every ticker (per-stock text that never varies isn't really about the stock),
+and finance jargon that assumes the reader already knows the term.
+
+Free — it reads stored data and calls no API.
+
+Worth knowing why it exists: clicking through real holdings only ever tests the situations you
+happen to own. On its first run it found wording that claimed "while profits grew" for a company
+whose profits had fallen — a case no current holding was in, so no amount of using the tool
+would have shown it.
+
 ## Not yet built
 
 - Decumulation model (how much to draw down, and from where)
