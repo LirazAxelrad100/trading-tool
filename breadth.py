@@ -74,6 +74,7 @@ def fetch(force: bool = False) -> dict:
             continue
         rows.append({
             "date": row.get("Date"),
+            "spx": _to_float(row.get("S&P500_Price")),
             "above_200d": above_200 * 100,
             "above_50d": above_50 * 100,
             "trend_200": _to_float(row.get("Breadth_200MA_Trend")),
@@ -88,6 +89,13 @@ def fetch(force: bool = False) -> dict:
     cache = {"fetched_date": today, "rows": rows[-HISTORY_ROWS:]}
     CACHE_FILE.write_text(json.dumps(cache, indent=2))
     return cache
+
+
+def market_series() -> dict:
+    """The S&P level that ships in the same CSV, as {date: price}. Lets correlations be
+    measured against the market instead of alongside it — without it, two stocks look
+    related mostly because the whole market moved on the same days."""
+    return {r["date"]: r["spx"] for r in fetch()["rows"] if r.get("spx")}
 
 
 def summary() -> dict:

@@ -134,6 +134,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     closes are USD, so currency movement leaks into the comparison. Small against three weeks
     of equity moves, but not nothing."""
     import alpha_vantage  # local import: only this path needs it, and it costs API budget
+    import breadth
 
     ticker = ticker.upper()
     if any(h["ticker"] == ticker for h in holdings):
@@ -151,11 +152,31 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
     closes = {b["date"]: b["close"] for b in bars}
 
-    shared = [d for d in dates if d in closes]
+    # Market series first: if it's available, restrict to days all three cover rather than
+    # requiring the market to have every date — that feed lags a day or two, so demanding a
+    # full overlap silently disabled the adjustment.
+    market = {}
+    try:
+        market = breadth.market_series()
+    except Exception:
+        market = {}
+
+    shared = [d for d in dates if d in closes and (not market or d in market)]
     if len(shared) < MIN_WORST_DAYS * 2:
         return {"error": f"Not enough overlapping days to compare {ticker} against your holdings."}
 
     candidate = _returns([closes[d] for d in shared])
+    # Subtract the market's own move from every series. Raw correlation over a few weeks is
+    # inflated by the fact that most stocks fall on the days the market falls, so a candidate
+    # can score ~0.5 against a bloc simply for being a normal risky US stock. Measured live
+    # (2026-09-05): AMD/WDC held at +0.62 -> +0.64 through the adjustment (genuinely linked)
+    # while NBIS/NVDA fell +0.42 -> +0.28 (a third of it was just the market).
+    market_returns = _returns([market[d] for d in shared]) if market else None
+    if market_returns and len(market_returns) != len(candidate):
+        market_returns = None
+    if market_returns:
+        candidate = [r - m for r, m in zip(candidate, market_returns)]
+
     held = {h["ticker"]: h for h in holdings}
     sales = sales or []
 
@@ -169,6 +190,8 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
         series = _returns(values)
         if len(series) != len(candidate):
             continue
+        if market_returns:
+            series = [r - m for r, m in zip(series, market_returns)]
         pairs.append({"ticker": other, "correlation": _correlation(candidate, series)})
 
     if not pairs:
@@ -187,6 +210,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
         "linked": linked,
         "joins_group": joins["tickers"] if joins else None,
         "joins_group_weight_pct": joins["weight_pct"] if joins else None,
+        "market_adjusted": bool(market_returns),
     }
 
 
