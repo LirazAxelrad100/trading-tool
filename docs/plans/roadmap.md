@@ -141,7 +141,7 @@ replacement.
    multiple compression") can't be pre-written. If these are ever LLM-generated, the prompt needs
    `SYSTEM_PROMPT`-level discipline — a question smuggles advice easily ("have you considered the
    multiple must reach 72×?" is a recommendation wearing a question mark).
-8. **Theme lifecycle staging** — the one thing the cheaper alternatives can't replicate: flagging
+8. **Theme lifecycle staging** ✅ BUILT FREE (2026-09-05), see CLAUDE.md — staged on the user's own #tags from trailing returns already fetched, rather than paying for market-wide themes she doesn't hold. The paid version below remains an option only if she ever wants themes she has *no* position in. Was: — the one thing the cheaper alternatives can't replicate: flagging
    a theme as Emerging vs. Exhausting *before* the unwind. Needs FINVIZ Elite (€35/mo). Only
    worth revisiting if the user decides to pay.
 

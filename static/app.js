@@ -1457,6 +1457,7 @@ function renderWatchlist() {
   }
 
   renderWatchTagFilters();
+  renderThemeStages();
 
   for (const field of ["ticker", "score", "move_1d", "move_1w", "move_3m"]) {
     const el = document.getElementById(`watch-arrow-${field}`);
@@ -1530,6 +1531,62 @@ const HASHTAG_RE = /#[\p{L}\p{N}_-]+/gu;
 
 function watchHashtags(w) {
   return ((w.why || "").match(HASHTAG_RE) || []).map((h) => h.toLowerCase());
+}
+
+// Theme lifecycle, on the user's own #tags rather than a vendor's theme list. The paid
+// FINVIZ-based skill scores 14 market-wide themes; these are the groups she actually holds
+// opinions about, and two free trailing returns separate "was strong and is unwinding" from
+// "still working" — which is the distinction that mattered, not the vendor's five-stage label.
+const THEME_STAGES = {
+  working: { label: "still working", cls: "price-up" },
+  unwinding: { label: "was strong, now unwinding", cls: "price-down" },
+  turning: { label: "falling for a year, rising lately", cls: "" },
+  cold: { label: "not working", cls: "price-down" },
+};
+
+function themeStage(m12, m3) {
+  if (m12 == null || m3 == null) return null;
+  if (m12 >= 0 && m3 >= 0) return "working";
+  if (m12 >= 0) return "unwinding";
+  if (m3 >= 0) return "turning";
+  return "cold";
+}
+
+function avg(values) {
+  const nums = values.filter((v) => typeof v === "number");
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+}
+
+function renderThemeStages() {
+  const host = document.getElementById("watch-theme-stages");
+  if (!host) return;
+  const groups = new Map();
+  for (const w of watchlist) {
+    for (const h of new Set(watchHashtags(w))) {
+      if (!groups.has(h)) groups.set(h, []);
+      groups.get(h).push(w);
+    }
+  }
+  const rows = [];
+  for (const [tag, items] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    if (items.length < 2) continue; // one ticker is a stock, not a theme
+    const m12 = avg(items.map((i) => i.move_12m));
+    const m3 = avg(items.map((i) => i.move_3m));
+    const oh = avg(items.map((i) => i.off_high));
+    const stage = themeStage(m12, m3);
+    if (!stage) continue;
+    const s = THEME_STAGES[stage];
+    rows.push(
+      `<li><strong>${escapeHtml(tag)}</strong> · ${items.length} names — <span class="${s.cls}">${
+        s.label
+      }</span><br /><span class="subtitle">${coloredPct(m12)} over the year, ${coloredPct(
+        m3
+      )} over 3 months${oh != null ? `, ${fmtPct(Math.abs(oh) / 100)} below their highs on average` : ""}.</span></li>`
+    );
+  }
+  host.innerHTML = rows.length
+    ? `<ul class="checklist-context">${rows.join("")}</ul>`
+    : `<p class="subtitle">Tag two or more tickers with the same #tag to see how that group is doing as a whole.</p>`;
 }
 
 function renderWatchTagFilters() {
