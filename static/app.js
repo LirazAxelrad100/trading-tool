@@ -1278,7 +1278,7 @@ function renderWatchlist() {
             : ""
         }
       </td>
-      <td class="nowrap">${w.added_date} ${sinceAddedCell(w)}</td>
+      <td class="nowrap">${w.added_date}${sinceAddedCell(w)}</td>
       <td>${w.current_price != null ? fmt(w.current_price) : "—"}</td>
       <td>${scoreText}</td>
       <td>${coloredPct(w.move_1d)}</td>
@@ -1362,10 +1362,10 @@ function toggleWatchTagFilter(tag) {
 }
 
 function sinceAddedCell(w) {
-  if (w.price_at_add == null || w.current_price == null || !w.price_at_add) {
-    return `<span class="subtitle" title="Added before entry prices were recorded">–</span>`;
-  }
-  return coloredPct((w.current_price / w.price_at_add - 1) * 100);
+  // Rows added before entry prices were recorded show the date alone — a placeholder dash
+  // just reads as a stray character next to it.
+  if (!w.price_at_add || w.current_price == null) return "";
+  return " " + coloredPct((w.current_price / w.price_at_add - 1) * 100);
 }
 
 function showWatchConsensus(id) {
