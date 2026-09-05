@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 import alpha_vantage
 import consensus_store
+import fundamentals
 import momentum
 import opportunities_b
 import prices
@@ -283,9 +284,15 @@ def synthesize(ticker: str) -> dict:
             }
         ],
     )
-    # Finnhub metrics supply only the trend context; a failure there degrades the badge to
-    # "no trend context" rather than losing the momentum reading entirely.
-    mom = _safe(momentum.from_daily_bars, ticker, metrics=_safe(prices.fetch_metrics, ticker))
+    # One metrics fetch serves both the momentum trend context and the fundamentals lens.
+    # A failure degrades the momentum badge to "no trend context" rather than losing the
+    # momentum reading entirely.
+    metrics = _safe(prices.fetch_metrics, ticker)
+    mom = _safe(momentum.from_daily_bars, ticker, metrics=metrics)
+    shape = _safe(prices.fetch_quote_shape, ticker)
+    fund = fundamentals.analyze(
+        metrics, data.get("earnings_history"), current_price_usd=shape.get("close")
+    )
 
     text_blocks = [block.text for block in message.content if block.type == "text"]
     if not text_blocks:
@@ -301,4 +308,5 @@ def synthesize(ticker: str) -> dict:
         "sector_context": sectors.sector_context(ticker),
         "volatility": _safe(risk.compute_volatility, ticker),
         "momentum": mom,
+        "fundamentals": fund,
     }

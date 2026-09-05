@@ -61,7 +61,7 @@ def _state(breakout: bool, extended: bool, day_change: Optional[float] = None) -
     return "quiet"
 
 
-def _pct_from_52w_high(close, high_52w, low_52w) -> Optional[float]:
+def pct_from_52w_high(close, high_52w, low_52w) -> Optional[float]:
     """Distance from the 52-week high, or None when Finnhub's range clearly describes a
     different instrument than its own /quote. Real case: for TSM, /quote returns the US ADR
     (~$427) while stock/metric returns the Taiwan listing's range (high 2535, low 1145 TWD),
@@ -108,7 +108,7 @@ def from_finnhub(shape: dict, metrics: dict) -> dict:
     vol_3m = metrics.get("3MonthAverageTradingVolume")
     vol_elevation = vol_10d / vol_3m if vol_10d and vol_3m else None
 
-    pct_from_high = _pct_from_52w_high(close, high_52w, metrics.get("52WeekLow"))
+    pct_from_high = pct_from_52w_high(close, high_52w, metrics.get("52WeekLow"))
 
     ret_3m = metrics.get("13WeekPriceReturnDaily")
 
@@ -164,7 +164,7 @@ def from_daily_bars(ticker: str, days: int = 90, metrics: Optional[dict] = None)
 
     m = metrics or {}
     ret_3m = m.get("13WeekPriceReturnDaily")
-    pct_from_high = _pct_from_52w_high(today["close"], m.get("52WeekHigh"), m.get("52WeekLow"))
+    pct_from_high = pct_from_52w_high(today["close"], m.get("52WeekHigh"), m.get("52WeekLow"))
 
     return {
         "source": "daily bars",

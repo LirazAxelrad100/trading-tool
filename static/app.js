@@ -670,6 +670,67 @@ function renderMomentum(m) {
     </div>`;
 }
 
+// Below this the multiple hasn't meaningfully moved — the market pays about what it did.
+const MULTIPLE_FLAT_PCT = 10;
+
+function fundamentalsLabel(f) {
+  // The sign-only quadrant is too crude when both are positive: FN was price +9% against
+  // earnings +42%, which the quadrant calls "moving together" while the multiple fell 23%.
+  // When both rise, the multiple decides which of them outran the other.
+  if (f.quadrant === "divergence") return "Price down, earnings up";
+  if (f.quadrant === "both_falling") return "Price and earnings both falling";
+  if (f.quadrant === "multiple_expansion") return "Price up, earnings down";
+  const mc = f.multiple_change_pct;
+  if (mc == null || Math.abs(mc) < MULTIPLE_FLAT_PCT) return "Price and earnings moving together";
+  return mc < 0 ? "Earnings outgrew the price" : "Price outran earnings";
+}
+
+function renderFundamentals(f) {
+  if (!f || f.error) {
+    return `<div class="risk-badge"><strong>Price vs. earnings: —</strong> <span class="subtitle">${
+      f && f.error ? f.error : "no fundamental data"
+    }</span></div>`;
+  }
+  const label = fundamentalsLabel(f);
+  const cls = f.quadrant === "both_falling" ? "price-down" : f.quadrant === "divergence" ? "price-up" : "";
+
+  const facts = [];
+  if (f.price_12m_pct != null) facts.push(`price ${fmtPct(f.price_12m_pct / 100)} over 12 months`);
+  if (f.eps_growth_pct != null) facts.push(`earnings per share ${fmtPct(f.eps_growth_pct / 100)}`);
+  if (f.revenue_growth_pct != null) facts.push(`revenue ${fmtPct(f.revenue_growth_pct / 100)}`);
+  if (f.pe_ttm != null) facts.push(`P/E ${fmt(f.pe_ttm)}`);
+  if (f.beats != null) facts.push(`beat estimates in ${f.beats} of ${f.beats + f.misses} recent quarters`);
+
+  // The pairing carries the meaning: how the multiple moved over the year, next to how far
+  // the price sits below its high. Either number alone is easy to misread.
+  const mc = f.multiple_change_pct;
+  const dd = f.pct_from_52w_high;
+  let reading = "";
+  if (mc != null) {
+    const flat = Math.abs(mc) < MULTIPLE_FLAT_PCT;
+    const direction = flat ? "barely moved" : mc > 0 ? `rose ${fmtPct(mc / 100)}` : `fell ${fmtPct(Math.abs(mc) / 100)}`;
+    reading =
+      `Over 12 months the market's valuation of each dollar of earnings ${direction}` +
+      (dd != null ? `, and the price now sits ${fmtPct(Math.abs(dd) / 100)} below its 52-week high. ` : ". ");
+    if (dd != null && dd <= -25) {
+      reading += flat
+        ? "So the fall has taken the valuation back to roughly where it was a year ago — on this measure the earlier peak was the unusual part, not the decline."
+        : mc < 0
+        ? "So even after the fall, the market pays less per dollar of earnings than a year ago while earnings grew — the divergence a recovery thesis looks for."
+        : "So despite the fall, the market still pays more per dollar of earnings than a year ago.";
+    }
+    reading += " ";
+  }
+
+  return `
+    <div class="risk-badge">
+      <strong>Price vs. earnings: <span class="${cls}">${label}</span></strong>
+      <span class="subtitle">${facts.join(" · ")}${
+    f.price_3m_pct != null ? ` · 3-month price ${fmtPct(f.price_3m_pct / 100)}` : ""
+  }. ${reading}Whether a decline has finished is not something this can tell you — it describes the setup, not the timing.</span>
+    </div>`;
+}
+
 function renderEarningsRisk(er) {
   if (!er || !er.near_earnings) return "";
   if (!er.triggered) {
@@ -689,6 +750,7 @@ function renderSignals(result) {
     renderSectorContext(result.sector_context) +
     renderRisk(result.volatility) +
     renderMomentum(result.momentum) +
+    renderFundamentals(result.fundamentals) +
     renderEarningsRisk(sig.earnings_risk) +
     renderSignalsTable(sig.metrics) +
     renderContradictions(sig.contradictions)
