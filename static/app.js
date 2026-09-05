@@ -1421,6 +1421,7 @@ function renderWatchlist() {
       <td>${zacksCell(w)}</td>
       <td class="watch-note-cell"></td>
       <td>
+        <button class="secondary" onclick="openRiskModal('${w.id}')" title="What would buying this put at risk?">Risk</button>
         <button class="secondary" onclick="promoteWatchItem('${w.id}')" title="Move this to your holdings, keeping the note">Bought</button>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
         <button class="secondary" onclick="refreshWatchItem('${w.id}')">Refresh</button>
@@ -1813,6 +1814,54 @@ function closeSellModal() {
 
 let lotsHoldingId = null;
 let editingLotIndex = null;
+
+let riskTicker = null;
+
+function openRiskModal(id) {
+  const w = watchlist.find((x) => x.id === id);
+  if (!w || w.current_price == null) return;
+  riskTicker = w;
+  document.getElementById("risk-modal-title").textContent = `${w.ticker} — what would this risk?`;
+  document.getElementById("risk-stop-hint").textContent = "% below your buy price — 10% on most of yours, ~22% on MU and NBIS";
+  document.getElementById("risk-amount").value = "";
+  document.getElementById("risk-stop").value = "10";
+  renderRiskPreview();
+  document.getElementById("risk-modal").style.display = "flex";
+}
+
+function closeRiskModal() {
+  document.getElementById("risk-modal").style.display = "none";
+  riskTicker = null;
+}
+
+function renderRiskPreview() {
+  const out = document.getElementById("risk-output");
+  if (!riskTicker) return;
+  const amount = parseEuNumber(document.getElementById("risk-amount").value);
+  const stopPct = parseEuNumber(document.getElementById("risk-stop").value);
+  if (isNaN(amount) || amount <= 0 || isNaN(stopPct) || stopPct <= 0 || stopPct >= 100) {
+    out.innerHTML = `<p class="subtitle">Enter an amount to see the numbers.</p>`;
+    return;
+  }
+  const price = riskTicker.current_price;
+  const shares = amount / price;
+  const atRisk = amount * (stopPct / 100);
+  // The portfolio grows by whatever is invested, so the new position's share is measured
+  // against the enlarged total rather than today's.
+  const portfolio = (lastHoldings || []).reduce((s, h) => s + h.shares * h.current_price, 0);
+  const enlarged = portfolio + amount;
+
+  out.innerHTML = `
+    <table class="mini-table"><tbody>
+      <tr><td>Buys</td><td><strong>${fmt(shares)}</strong> shares at ${fmt(price)}</td></tr>
+      <tr><td>Position size</td><td><strong>${fmtPct(amount / enlarged)}</strong> of your portfolio afterwards</td></tr>
+      <tr><td>Stop at</td><td>${fmt(price * (1 - stopPct / 100))}</td></tr>
+      <tr><td>If the stop is hit</td><td><span class="price-down">−${fmt(atRisk)}</span> — ${fmtPct(
+    atRisk / enlarged
+  )} of the portfolio</td></tr>
+    </tbody></table>
+    <p class="subtitle">A stop doesn't guarantee that exit price — a gap down opens below it, and the loss is whatever you actually sell at. Your broker's live order is the real protection; this tool only tracks the level.</p>`;
+}
 
 let thesisHoldingId = null;
 

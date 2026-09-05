@@ -128,7 +128,7 @@ replacement.
    removes the Watch List entry. Keep `price_at_add` visible somewhere too — the gap between "the
    price when I first noticed it" and "the price I paid" is worth seeing. Small, and it protects
    the thesis capture built on 2026-09-05 rather than adding anything new.
-5. **Risk preview on Watch List items** — before buying, show "at today's price with a 15% stop,
+5. **Risk preview on Watch List items** ✅ BUILT (2026-09-05), see CLAUDE.md — before buying, show "at today's price with a 15% stop,
    a full position of €X puts €Y at risk, Z% of the portfolio". This is the genuinely borrowable
    half of `breakout-trade-planner`: arithmetic about a hypothetical, no buy/qty/conviction.
 6. **`market-breadth-analyzer`** (from the skills library) — free public CSV, no API key, one
