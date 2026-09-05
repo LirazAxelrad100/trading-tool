@@ -460,16 +460,58 @@ def delete_sales_entry(entry_id: str):
 
 class WatchlistIn(BaseModel):
     ticker: str
+    tag: str = ""
+    source_url: str = ""
+    why: str = ""
 
 
-class WatchlistNoteIn(BaseModel):
-    note: str = ""
+class WatchlistMetaIn(BaseModel):
+    """Every field optional so one endpoint serves each inline edit independently —
+    omitting a field leaves it untouched rather than blanking it."""
+    tag: Optional[str] = None
+    source_url: Optional[str] = None
+    why: Optional[str] = None
+    note: Optional[str] = None
+
+
+def clean_source_url(url: str) -> str:
+    """Only http(s) links are stored. The value is rendered as a clickable link in the UI,
+    so a `javascript:` or `data:` URL would execute when clicked — reject anything else
+    rather than trusting the scheme."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=422,
+            detail="The source link must start with http:// or https://",
+        )
+    return url
 
 
 def load_watchlist() -> list[dict]:
     if not WATCHLIST_FILE.exists():
         return []
-    return json.loads(WATCHLIST_FILE.read_text())
+    items = json.loads(WATCHLIST_FILE.read_text())
+    migrated = False
+    for it in items:
+        if "tag" not in it:
+            # Every note written before this feature existed was a source label — "zacks
+            # report ai bubble", "zacks recommendation / gold" — never reasoning, so they
+            # belong in the tag. Moving them frees `why` for what the note never held.
+            it["tag"] = (it.pop("note", "") or "").strip()
+            it.setdefault("source_url", "")
+            it.setdefault("why", "")
+            it.setdefault("note", "")
+            # Items added before the entry snapshot existed have no honest value to
+            # backfill — reconstructing it would cost API budget for a guess.
+            it.setdefault("price_at_add", None)
+            it.setdefault("score_at_add", None)
+            it.setdefault("consensus_at_add", None)
+            migrated = True
+    if migrated:
+        save_watchlist(items)
+    return items
 
 
 def save_watchlist(items: list[dict]) -> None:
@@ -541,7 +583,23 @@ def add_watchlist_item(item: WatchlistIn):
     except PriceError as e:
         raise HTTPException(status_code=502, detail=f"Could not find a price for '{ticker}' — check the symbol. ({e})")
 
-    new_item = {"id": str(uuid.uuid4()), "ticker": ticker, "added_date": date.today().isoformat(), "note": "", **data}
+    # Entry snapshot: what this looked like the moment it went on the list. Captured
+    # automatically because the alternative is reconstructing it later from Alpha Vantage
+    # history — which is approximate, costs API budget, and is impossible once a ticker
+    # leaves the list. Lets every row answer "how has this done since I added it".
+    new_item = {
+        "id": str(uuid.uuid4()),
+        "ticker": ticker,
+        "added_date": date.today().isoformat(),
+        "tag": item.tag.strip(),
+        "source_url": clean_source_url(item.source_url),
+        "why": item.why.strip(),
+        "note": "",
+        "price_at_add": data.get("current_price"),
+        "score_at_add": (data.get("score") or {}).get("composite"),
+        "consensus_at_add": (data.get("consensus") or {}).get("average"),
+        **data,
+    }
     items.append(new_item)
     save_watchlist(items)
     return new_item
@@ -555,11 +613,18 @@ def delete_watchlist_item(item_id: str):
     return {"ok": True}
 
 
-@app.put("/api/watchlist/{item_id}/note")
-def update_watchlist_note(item_id: str, body: WatchlistNoteIn):
+@app.put("/api/watchlist/{item_id}/meta")
+def update_watchlist_meta(item_id: str, body: WatchlistMetaIn):
     items = load_watchlist()
     watch_item = find_watch_item(items, item_id)
-    watch_item["note"] = body.note
+    if body.tag is not None:
+        watch_item["tag"] = body.tag.strip()
+    if body.source_url is not None:
+        watch_item["source_url"] = clean_source_url(body.source_url)
+    if body.why is not None:
+        watch_item["why"] = body.why.strip()
+    if body.note is not None:
+        watch_item["note"] = body.note
     save_watchlist(items)
     return watch_item
 

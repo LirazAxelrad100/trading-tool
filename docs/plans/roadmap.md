@@ -95,7 +95,7 @@ GICS view structurally splits a cross-sector theme apart. This is the concrete a
 replacement.
 
 ### Backlog, in recommended build order
-1. **Thesis capture at entry.** When adding a Watch List item, record *why* (recovery /
+1. **Thesis capture at entry.** ✅ BUILT (2026-09-05) — see CLAUDE.md's Watch List entry. Shipped as tag + source link + why + an automatic entry snapshot. Two design notes worth keeping: an early reading that the 8 empty notes meant "optional fields get skipped under time pressure" was **wrong** — the note field simply didn't exist when those rows were added, and that mistaken premise was the whole argument for deferring the `why` field. And the user's own argument for including it is the one that settled it: *"if we don't have this in the interface it will never happen"* — the same reasoning as the pre-trade-checklist item below. The existing notes also turned out to be source labels rather than reasoning, which is why tag and why are separate fields and why tags double as the grouping in item 3. When adding a Watch List item, record *why* (recovery /
    momentum / theme / income) and *what would prove it wrong*, extending the free-text note
    that already exists. Then the tool can close the loop itself later: "added 9 Aug at $528 as
    a recovery thesis; now $483, earnings still growing, multiple flat over 12 months." Cheap,
