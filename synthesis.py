@@ -234,14 +234,9 @@ def derive_signals(data: dict, momentum_data: Optional[dict] = None) -> dict:
             f"performance have been pointing opposite ways for a while."
         )
 
-    if md.get("state") == "burst" and md.get("trend") == "downtrend":
-        pfh = md.get("pct_from_52w_high")
-        where = f", still {abs(pfh):.0f}% below its 52-week high" if is_num(pfh) else ""
-        contradictions.append(
-            f"Mixed signal: the sharp rise flagged in the momentum badge is happening inside a downtrend{where}. "
-            f"A jump like this in a falling stock is a bounce rather than a breakout — a distinction the "
-            f"momentum method itself draws, since its setups assume a stock already trending up."
-        )
+    # The burst-inside-a-downtrend tension was removed 2026-09-05: the momentum line says it
+    # already ("up today, but inside a downtrend"), and repeating it at paragraph length in the
+    # tensions box padded a section whose whole value is that everything in it is worth stopping for.
 
     earnings_risk = _earnings_risk(p4, next_earnings, data.get("news_sentiment"))
 
