@@ -822,8 +822,6 @@ function renderFundamentals(f) {
       )}.`
     );
   }
-  if (f.price_3m_pct != null)
-    sentences.push(`Over the past 3 months the share price moved ${pct(f.price_3m_pct)}.`);
 
   const mc = f.multiple_change_pct;
   const dd = f.pct_from_52w_high;
@@ -856,6 +854,17 @@ function renderFundamentals(f) {
     } else if (!flat && mc < 0) {
       sentences.push("Profit grew faster than the share price, so the shares are cheaper relative to earnings than a year ago.");
     }
+  }
+
+  // The 3-month move goes last, not between the yearly pair and the conclusion drawn from it:
+  // sitting in the middle it read as though the valuation change followed from the quarter.
+  // It has no profit counterpart because Finnhub's growth figures are trailing-twelve-month.
+  if (f.price_3m_pct != null) {
+    sentences.push(
+      `Over the past 3 months alone the share price moved ${pct(
+        f.price_3m_pct
+      )}, though profit is only comparable over a full year, so there is no matching figure for that stretch.`
+    );
   }
 
   return `
