@@ -1174,6 +1174,8 @@ function watchSortValue(w, field) {
   if (field === "ticker") return w.ticker.toLowerCase();
   // Sorts bursting names to one end and extended ones to the other, with quiet in between.
   if (field === "momentum") return w.momentum ? MOMENTUM_SORT_RANK[w.momentum.state] ?? null : null;
+  // Empty tags sort last rather than clumping at the top as "".
+  if (field === "tag") return (w.tag || "").trim().toLowerCase() || null;
   return w[field];
 }
 
@@ -1224,7 +1226,14 @@ function renderWatchlist() {
     });
   }
 
-  for (const field of ["ticker", "score", "move_1w", "move_3m", "momentum"]) {
+  const datalist = document.getElementById("watch-tag-options");
+  if (datalist) {
+    datalist.innerHTML = watchTagOptions()
+      .map((t) => `<option value="${escapeHtml(t)}"></option>`)
+      .join("");
+  }
+
+  for (const field of ["ticker", "score", "move_1w", "move_3m", "momentum", "tag"]) {
     const el = document.getElementById(`watch-arrow-${field}`);
     if (!el) continue;
     el.textContent = field === watchSortField ? (watchSortDir === 1 ? "▲" : "▼") : "";
@@ -1234,14 +1243,22 @@ function renderWatchlist() {
     const tr = document.createElement("tr");
     const scoreText = w.score ? Math.round(w.score.composite * 100) : "—";
     tr.innerHTML = `
-      <td><span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span></td>
-      <td>${w.added_date}</td>
+      <td>
+        <span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span>
+        ${
+          w.source_url
+            ? `<a class="source-link" href="${escapeHtml(w.source_url)}" target="_blank" rel="noopener noreferrer" title="Open the source you added this from">↗</a>`
+            : ""
+        }
+      </td>
+      <td>${w.added_date}<br /><span class="subtitle">since: ${sinceAddedCell(w)}</span></td>
       <td>${w.current_price != null ? fmt(w.current_price) : "—"}</td>
       <td>${scoreText}</td>
       <td>${coloredPct(w.move_1w)}</td>
       <td>${coloredPct(w.move_3m)}</td>
       <td>${momentumCell(w.momentum)}</td>
       <td>${zacksCell(w)}</td>
+      <td class="watch-tag-cell"></td>
       <td class="watch-note-cell"></td>
       <td>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
@@ -1249,25 +1266,55 @@ function renderWatchlist() {
         <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>
       </td>
     `;
-    const noteInput = document.createElement("input");
-    noteInput.type = "text";
-    noteInput.className = "watch-note-input";
-    noteInput.placeholder = "Why this ticker?";
-    noteInput.value = w.note || "";
-    noteInput.addEventListener("change", () => saveWatchNote(w.id, noteInput.value));
-    tr.querySelector(".watch-note-cell").appendChild(noteInput);
+    // Built as elements rather than innerHTML so the user's own text can never be
+    // parsed as markup.
+    const tagInput = document.createElement("input");
+    tagInput.type = "text";
+    tagInput.className = "watch-note-input";
+    tagInput.placeholder = "Source / group";
+    tagInput.setAttribute("list", "watch-tag-options");
+    tagInput.value = w.tag || "";
+    tagInput.addEventListener("change", () => saveWatchMeta(w.id, { tag: tagInput.value }));
+    tr.querySelector(".watch-tag-cell").appendChild(tagInput);
+
+    const whyInput = document.createElement("input");
+    whyInput.type = "text";
+    whyInput.className = "watch-note-input";
+    whyInput.placeholder = "What convinced you?";
+    whyInput.value = w.why || "";
+    whyInput.addEventListener("change", () => saveWatchMeta(w.id, { why: whyInput.value }));
+    tr.querySelector(".watch-note-cell").appendChild(whyInput);
     body.appendChild(tr);
   }
 }
 
-async function saveWatchNote(id, note) {
-  await fetch(`/api/watchlist/${id}/note`, {
+async function saveWatchMeta(id, patch) {
+  const res = await fetch(`/api/watchlist/${id}/meta`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note }),
+    body: JSON.stringify(patch),
   });
-  const w = watchlist.find((x) => x.id === id);
-  if (w) w.note = note;
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.detail || "Could not save.");
+    await loadWatchlist();
+    return;
+  }
+  Object.assign(
+    watchlist.find((x) => x.id === id) || {},
+    await res.json()
+  );
+}
+
+function watchTagOptions() {
+  return [...new Set(watchlist.map((w) => (w.tag || "").trim()).filter(Boolean))].sort();
+}
+
+function sinceAddedCell(w) {
+  if (w.price_at_add == null || w.current_price == null || !w.price_at_add) {
+    return `<span class="subtitle" title="Added before entry prices were recorded">–</span>`;
+  }
+  return coloredPct((w.current_price / w.price_at_add - 1) * 100);
 }
 
 function showWatchConsensus(id) {
@@ -1281,6 +1328,9 @@ function showWatchConsensus(id) {
 
 async function addWatchItem() {
   const input = document.getElementById("watch-ticker-input");
+  const tagInput = document.getElementById("watch-tag-input");
+  const urlInput = document.getElementById("watch-url-input");
+  const whyInput = document.getElementById("watch-why-input");
   const ticker = input.value.trim().toUpperCase();
   if (!ticker) return;
   const btn = document.getElementById("watch-add-btn");
@@ -1290,7 +1340,12 @@ async function addWatchItem() {
     const res = await fetch("/api/watchlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker }),
+      body: JSON.stringify({
+        ticker,
+        tag: tagInput.value.trim(),
+        source_url: urlInput.value.trim(),
+        why: whyInput.value.trim(),
+      }),
     });
     if (!res.ok) {
       const err = await res.json();
@@ -1298,6 +1353,10 @@ async function addWatchItem() {
       return;
     }
     input.value = "";
+    whyInput.value = "";
+    urlInput.value = "";
+    // Tag is deliberately left in place: adds come in batches from one source, so the
+    // next ticker from the same article needs no retyping.
     await loadWatchlist();
   } finally {
     btn.disabled = false;

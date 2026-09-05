@@ -242,3 +242,12 @@ th.sortable:hover { color: var(--text); }
 .compare-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 0.5rem; }
 .compare-col h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
 .compare-col .consensus-table { margin-bottom: 0.75rem; }
+
+/* Source link on a watch-list row — the article the idea came from. */
+.source-link {
+  margin-left: 4px;
+  text-decoration: none;
+  color: var(--accent, #6b8afd);
+  font-size: 0.85em;
+}
+.source-link:hover { text-decoration: underline; }

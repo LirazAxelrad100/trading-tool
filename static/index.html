@@ -179,6 +179,13 @@
       <h2>Add to watch list</h2>
       <div class="add-form">
         <div><label>Ticker</label><input id="watch-ticker-input" placeholder="AAPL" /></div>
+        <div>
+          <label>Tag <span class="info" tabindex="0">i<span class="tooltip">Where the idea came from, e.g. "zacks report ai bubble". Reusing a tag groups those tickers together as one bet — pick a previous tag from the list instead of retyping.</span></span></label>
+          <input id="watch-tag-input" list="watch-tag-options" placeholder="zacks report ai bubble" />
+          <datalist id="watch-tag-options"></datalist>
+        </div>
+        <div><label>Source link</label><input id="watch-url-input" placeholder="https://…" /></div>
+        <div><label>Why <span class="info" tabindex="0">i<span class="tooltip">The reasoning in your own words — a TLDR of the source is plenty. Optional, but it's the part you can't reconstruct later.</span></span></label><input id="watch-why-input" placeholder="What convinced you?" /></div>
         <button id="watch-add-btn" onclick="addWatchItem()">Add</button>
       </div>
     </div>
@@ -201,7 +208,8 @@
             <th class="sortable" onclick="watchSortBy('move_3m')">3M % <span id="watch-arrow-move_3m" class="arrow"></span></th>
             <th class="sortable" onclick="watchSortBy('momentum')">Momentum <span id="watch-arrow-momentum" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>Recent price/volume behaviour</strong> — <strong>Burst</strong> = up 4%+ today; <strong>Extended</strong> = up 20%+ over the last 5 days, so most of the move has already happened. Hover a cell for the underlying numbers. Descriptive only: it says what just happened, not what happens next.</span></span></th>
             <th>Zacks / Cons. <span class="info" tabindex="0"><span class="tooltip"><strong>Zacks Rank / analyst consensus average.</strong> Zacks Rank: 1 (Strong Buy) to 5 (Strong Sell), from your last CSV import — dash if this ticker isn't in it. Consensus average: same 1–5 scale, from live analyst ratings fetched on refresh.</span></span></th>
-            <th>Note</th>
+            <th class="sortable" onclick="watchSortBy('tag')">Tag <span id="watch-arrow-tag" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip">Where the idea came from. Tickers sharing a tag came from the same source — sort by this to see whether several rows are really one bet.</span></span></th>
+            <th>Why</th>
             <th></th>
           </tr>
         </thead>
