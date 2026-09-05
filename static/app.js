@@ -819,7 +819,8 @@ function renderFundamentals(f) {
       )}.`
     );
   }
-  if (f.price_3m_pct != null) sentences.push(`Over the past 3 months the price moved ${pct(f.price_3m_pct)}.`);
+  if (f.price_3m_pct != null)
+    sentences.push(`Over the past 3 months the share price moved ${pct(f.price_3m_pct)}.`);
 
   const mc = f.multiple_change_pct;
   const dd = f.pct_from_52w_high;
@@ -834,21 +835,32 @@ function renderFundamentals(f) {
         ? "So investors pay about what they did a year ago for the same profit."
         : `So investors now pay ${pct(Math.abs(mc))} ${mc > 0 ? "more" : "less"} for the same profit than a year ago.`
     );
+    // Two different situations need different readings, and only the falling one is about a
+    // recovery. A stock that has risen needs the opposite point: how much of the gain came
+    // from the business earning more, and how much from the market simply paying more.
     if (dd != null && dd <= -25) {
       sentences.push(
         flat
-          ? `The price is ${pct(Math.abs(dd))} below its 12-month high, so the fall mostly undid an unusually high peak.`
+          ? `The share price is ${pct(Math.abs(dd))} below its 12-month high, so the fall mostly undid an unusually high peak.`
           : mc < 0
-          ? `The price is ${pct(Math.abs(dd))} below its 12-month high — profit grew while the share got cheaper, the mismatch a recovery bet looks for.`
-          : `The price is ${pct(Math.abs(dd))} below its 12-month high and still costs more relative to profit than a year ago.`
+          ? `The share price is ${pct(Math.abs(dd))} below its 12-month high — profit grew while the share got cheaper, the mismatch a recovery bet looks for.`
+          : `The share price is ${pct(Math.abs(dd))} below its 12-month high and still costs more relative to profit than a year ago.`
       );
+    } else if (!flat && mc > 0) {
+      sentences.push(
+        "Part of the gain is the business earning more and part is the market deciding to pay more for it — and the second half can reverse without the company doing anything wrong."
+      );
+    } else if (!flat && mc < 0) {
+      sentences.push("Profit grew faster than the share price, so the shares are cheaper relative to earnings than a year ago.");
     }
   }
 
   return `
     <div class="risk-badge">
       <strong>Price vs. profits: <span class="${cls}">${fundamentalsLabel(f)}</span></strong>
-      <span class="subtitle">${sentences.join(" ")} It can't say whether a fall is over.</span>
+      <span class="subtitle">${sentences.join(" ")}${
+    f.pct_from_52w_high != null && f.pct_from_52w_high <= -25 ? " It can't say whether a fall is over." : ""
+  }</span>
     </div>`;
 }
 
