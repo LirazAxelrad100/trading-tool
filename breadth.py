@@ -109,3 +109,31 @@ def summary() -> dict:
         "bearish_50": latest["bearish_50"],
         "stale": latest["date"] != date.today().isoformat(),
     }
+
+
+# Where one stock sits inside the market figure above. "51% of stocks are above their 50-day
+# average" says nothing about the stock in front of you — this applies the identical measure
+# to a single ticker, so the market number becomes a place to stand rather than trivia.
+#
+# Only the 50-day is computed: Alpha Vantage's free tier returns ~100 trading days, so a
+# 200-day average isn't available (outputsize=full is premium — see CLAUDE.md's hard rule).
+MA_WINDOW = 50
+
+
+def stock_position(ticker: str) -> dict:
+    """Is this stock above or below its own 50-day average? Reuses alpha_vantage's per-ticker-
+    per-day cache, so it's free when the ticker was already fetched today."""
+    import alpha_vantage
+
+    bars = alpha_vantage.fetch_daily_prices(ticker.upper(), days=MA_WINDOW + 10)
+    closes = [b["close"] for b in bars]
+    if len(closes) < MA_WINDOW:
+        return {"error": f"Not enough price history to place {ticker.upper()} against its 50-day average."}
+    average = sum(closes[-MA_WINDOW:]) / MA_WINDOW
+    latest = closes[-1]
+    return {
+        "ticker": ticker.upper(),
+        "above": latest > average,
+        "distance_pct": (latest / average - 1) * 100,
+        "as_of": bars[-1]["date"],
+    }

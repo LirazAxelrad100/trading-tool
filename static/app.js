@@ -2058,7 +2058,7 @@ function renderRiskContext() {
     );
   }
   bits.push(
-    `<li id="overlap-slot">Does it move with what you already hold? <button class="secondary" onclick="checkOverlap()">Check</button> <span class="subtitle">uses one Alpha Vantage call the first time each day</span></li>`
+    `<li id="overlap-slot">Where does it sit — rising or falling, and does it move with what you already hold? <button class="secondary" onclick="checkOverlap()">Check</button> <span class="subtitle">uses one Alpha Vantage call the first time each day</span></li>`
   );
   host.innerHTML = `<ul class="checklist-context">${bits.join("")}</ul>`;
 }
@@ -2070,8 +2070,13 @@ async function checkOverlap() {
   if (!slot || !riskTicker) return;
   slot.innerHTML = "Checking…";
   try {
-    const res = await fetch(`/api/concentration/compare/${riskTicker.ticker}`);
+    // Both reads share alpha_vantage's per-ticker-per-day cache, so this is one call.
+    const [res, posRes] = await Promise.all([
+      fetch(`/api/concentration/compare/${riskTicker.ticker}`),
+      fetch(`/api/breadth/position/${riskTicker.ticker}`),
+    ]);
     const d = await res.json();
+    const pos = await posRes.json();
     if (!res.ok || d.error) {
       slot.innerHTML = `<span class="subtitle">Couldn't check: ${d.detail || d.error}</span>`;
       return;
@@ -2084,7 +2089,20 @@ async function checkOverlap() {
       : d.pairs[0].correlation >= 0.35
       ? `<span>It leans towards your existing holdings without clearly joining them.</span>`
       : `<span class="price-up">It moves largely on its own</span> relative to what you hold.`;
-    slot.innerHTML = `${verdict}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
+    // Places the stock inside the market figure shown just above, using the same measure.
+    let place = "";
+    if (posRes.ok && !pos.error && lastBreadth) {
+      place = pos.above
+        ? `<br /><span class="price-up">It is one of the ${fmtPct(
+            lastBreadth.above_50d / 100
+          )} that are rising</span> — ${fmtPct(pos.distance_pct / 100)} above its own 50-day average.`
+        : `<br /><span class="price-down">It is one of the ${fmtPct(
+            1 - lastBreadth.above_50d / 100
+          )} that are not rising</span> — ${fmtPct(
+            Math.abs(pos.distance_pct) / 100
+          )} below its own 50-day average.`;
+    }
+    slot.innerHTML = `${verdict}${place}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
   } catch (e) {
     slot.innerHTML = `<span class="subtitle">Couldn't check: ${e.message || e}</span>`;
   }
