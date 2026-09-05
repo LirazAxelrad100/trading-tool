@@ -311,6 +311,22 @@ function renderConcentration(c) {
       </div>`);
   }
 
+  const dd = c.down_days;
+  if (dd) {
+    parts.push(`
+      <p><strong>On the ${dd.days_used} worst days</strong> (portfolio averaged ${fmtPct(
+      dd.portfolio_avg_pct / 100
+    )} on those days) — day-to-day independence matters least exactly when things fall together, so this is the harder test:</p>
+      <table class="mini-table"><tbody>${dd.holdings
+        .map(
+          (r) =>
+            `<tr><td>${r.ticker}</td><td>${coloredPct(r.avg_return_pct)}</td><td class="subtitle">fell on ${
+              r.fell_on
+            } of ${r.of_days}</td></tr>`
+        )
+        .join("")}</tbody></table>`);
+  }
+
   if (c.independent.length) {
     parts.push(
       `<p><strong>Moving on their own:</strong> ${c.independent

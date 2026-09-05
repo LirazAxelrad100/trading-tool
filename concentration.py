@@ -80,6 +80,45 @@ def _group(tickers: list, correlations: dict) -> list:
     return [sorted(members) for members in blocs.values()]
 
 
+# Correlation measured across calm days answers the wrong question. Holdings that trade
+# independently day to day often fall together in a genuine shock, which is exactly when the
+# diversification was supposed to help — so this reports how each holding actually behaved on
+# the portfolio's worst days. A share of days is used rather than a fixed count so it still
+# means something as the history grows.
+WORST_DAY_SHARE = 0.25
+MIN_WORST_DAYS = 4
+
+
+def _down_day_behaviour(returns_by_ticker: dict, dates: list, portfolio: list) -> Optional[dict]:
+    """On the days the whole portfolio fell hardest, what did each holding do? A holding that
+    still rose on those days genuinely cushioned; one that fell harder than the portfolio
+    amplified the move regardless of how independent it looks on an average day."""
+    if len(portfolio) < MIN_WORST_DAYS * 2:
+        return None
+    count = max(MIN_WORST_DAYS, int(len(portfolio) * WORST_DAY_SHARE))
+    worst = sorted(range(len(portfolio)), key=lambda i: portfolio[i])[:count]
+    if all(portfolio[i] >= 0 for i in worst):
+        return None
+
+    rows = []
+    for ticker, series in returns_by_ticker.items():
+        picked = [series[i] for i in worst if i < len(series)]
+        if not picked:
+            continue
+        rows.append({
+            "ticker": ticker,
+            "avg_return_pct": statistics.mean(picked) * 100,
+            "fell_on": sum(1 for r in picked if r < 0),
+            "of_days": len(picked),
+        })
+    rows.sort(key=lambda r: r["avg_return_pct"])
+    return {
+        "days_used": count,
+        "portfolio_avg_pct": statistics.mean([portfolio[i] for i in worst]) * 100,
+        "holdings": rows,
+    }
+
+
 def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict:
     sales = sales or []
     if not holdings or not history:
@@ -137,9 +176,17 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
             "min_correlation": min(pairs),
         })
 
+    # The portfolio's own daily return, summed across the usable holdings only, so the
+    # "worst days" are the ones these holdings actually drove.
+    totals = []
+    for d in dates:
+        totals.append(sum(by_ticker[t][d] for t in usable))
+    portfolio_returns = _returns(totals)
+
     groups.sort(key=lambda g: -g["weight_pct"])
     singles.sort(key=lambda s: -s["weight_pct"])
     return {
+        "down_days": _down_day_behaviour(usable, dates, portfolio_returns),
         "days": len(dates),
         "returns": len(next(iter(usable.values()))),
         "from_date": since,
