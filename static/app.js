@@ -1107,17 +1107,65 @@ async function addHolding() {
   if (refRaw) payload.reference_high = parseEuNumber(refRaw);
   if (isin) payload.isin = isin;
 
-  await fetch(API, {
+  const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+
+  // Buying something off the watch list should carry its reasoning onto the position —
+  // the thesis was written while it was still a candidate, and the holding is where it
+  // starts mattering. Matched on ticker so editing the field before submitting cancels it.
+  if (res.ok && pendingPromotion) {
+    if (pendingPromotion.ticker === ticker.toUpperCase()) {
+      const created = await res.json();
+      if (created && created.id && (pendingPromotion.why || pendingPromotion.source_url)) {
+        await fetch(`/api/holdings/${created.id}/thesis`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            why: pendingPromotion.why || "",
+            source_url: pendingPromotion.source_url || "",
+          }),
+        });
+      }
+      await fetch(`/api/watchlist/${pendingPromotion.watchId}`, { method: "DELETE" });
+      await loadWatchlist();
+    }
+    setPendingPromotion(null);
+  }
 
   ["f-ticker", "f-shares", "f-cost", "f-date", "f-stop", "f-ref", "f-isin"].forEach(
     (id) => (document.getElementById(id).value = "")
   );
   document.getElementById("f-exit-plan").value = "hold";
   await render();
+}
+
+let pendingPromotion = null;
+
+function setPendingPromotion(p) {
+  pendingPromotion = p;
+  const banner = document.getElementById("promotion-note");
+  if (!banner) return;
+  banner.style.display = p ? "block" : "none";
+  if (p) {
+    banner.innerHTML = `Buying <strong>${escapeHtml(p.ticker)}</strong> from your watch list — its note ${
+      p.why ? "will be copied onto the holding" : "is empty, so nothing will be copied"
+    }, and the watch-list entry will be removed once you add it. <span class="lots-link" onclick="setPendingPromotion(null)">cancel</span>`;
+  }
+}
+
+function promoteWatchItem(id) {
+  const w = watchlist.find((x) => x.id === id);
+  if (!w) return;
+  setPendingPromotion({ watchId: w.id, ticker: w.ticker, why: w.why, source_url: w.source_url });
+  showTab("stocks");
+  const field = document.getElementById("f-ticker");
+  field.value = w.ticker;
+  document.getElementById("f-date").value = new Date().toISOString().slice(0, 10);
+  field.scrollIntoView({ block: "center" });
+  document.getElementById("f-shares").focus();
 }
 
 function renderFlag(id, result) {
@@ -1373,6 +1421,7 @@ function renderWatchlist() {
       <td>${zacksCell(w)}</td>
       <td class="watch-note-cell"></td>
       <td>
+        <button class="secondary" onclick="promoteWatchItem('${w.id}')" title="Move this to your holdings, keeping the note">Bought</button>
         <button class="secondary" onclick="analyzeTicker('${w.ticker}')">Analyze</button>
         <button class="secondary" onclick="refreshWatchItem('${w.id}')">Refresh</button>
         <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>

@@ -118,7 +118,7 @@ replacement.
    left — and what got built — is the **holdings** half, where it matters more (real money) and where no tags exist. Correlation also
    finds groupings that no tag would, and disproves ones that look obvious: PLTR reads as an AI position by name but moves independently.
 
-4. **Carry the `why` from Watch List to holding when you buy.** Today the two lists are entirely
+4. **Carry the `why` from Watch List to holding when you buy.** ✅ BUILT (2026-09-05) — a "Bought" button, see CLAUDE.md. Was: today the two lists are entirely
    unconnected: there is no promote/buy action at all, so buying a watched ticker means adding it
    through the Add-holding form while the Watch List row (and its `why`, `source_url` and
    `price_at_add`) is left behind or deleted. That loses the reasoning at exactly the moment it
