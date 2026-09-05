@@ -690,57 +690,52 @@ function renderFundamentals(f) {
       f && f.error ? f.error : "no profit figures available for this company"
     }</span></div>`;
   }
-  const label = fundamentalsLabel(f);
   const cls = f.quadrant === "both_falling" ? "price-down" : f.quadrant === "divergence" ? "price-up" : "";
+  const pct = (v) => fmtPct(v / 100);
 
-  const facts = [];
-  if (f.price_12m_pct != null) facts.push(`share price ${fmtPct(f.price_12m_pct / 100)} over the past year`);
-  if (f.price_3m_pct != null) facts.push(`${fmtPct(f.price_3m_pct / 100)} over the past 3 months`);
-  if (f.eps_growth_pct != null) facts.push(`profit per share ${fmtPct(f.eps_growth_pct / 100)}`);
-  if (f.revenue_growth_pct != null) facts.push(`sales ${fmtPct(f.revenue_growth_pct / 100)}`);
-  // Both of these were jargon: "P/E 40,33" and "beat estimates in 4 of 4" assume the reader
-  // already knows what a multiple is and that analysts publish quarterly profit forecasts.
-  if (f.pe_ttm != null)
-    facts.push(`the share price is ${fmt(f.pe_ttm)}× the company's yearly profit per share (its "P/E")`);
-  if (f.beats != null)
-    facts.push(
-      `profits came in above analysts' forecasts in ${f.beats} of the last ${f.beats + f.misses} quarterly reports`
+  // Deliberately short: the year's price move, the year's profit move, what that does to
+  // what investors pay, and how far the price is off its high. Sales growth, the P/E and
+  // the beat record were dropped — the beat record already appears in the signals table
+  // above, and the rest was reference detail crowding out the one comparison this exists
+  // to make.
+  const sentences = [];
+  if (f.price_12m_pct != null && f.eps_growth_pct != null) {
+    sentences.push(
+      `Over the past year the share price moved ${pct(f.price_12m_pct)} while profit per share moved ${pct(
+        f.eps_growth_pct
+      )}.`
     );
+  }
+  if (f.price_3m_pct != null) sentences.push(`Over the past 3 months the price moved ${pct(f.price_3m_pct)}.`);
 
-  // The pairing carries the meaning: how the valuation moved over the year, next to how far
-  // the price sits below its high. Either number alone is easy to misread.
   const mc = f.multiple_change_pct;
   const dd = f.pct_from_52w_high;
-  let reading = "";
   if (f.eps_base_distorted) {
-    reading =
-      "Profit per share grew so steeply here that it's almost certainly recovering from a very low base rather than expanding — which makes any comparison of price against profits over this period unreliable. Treat the figures above as raw numbers, not as a read on how the shares are valued. ";
+    sentences.push(
+      "Profit grew so steeply that it is rebounding from a very low base rather than expanding, which makes comparing price against profit unreliable here."
+    );
   } else if (mc != null) {
     const flat = Math.abs(mc) < MULTIPLE_FLAT_PCT;
-    const direction = flat
-      ? "investors pay roughly what they did a year ago for the same amount of profit"
-      : mc > 0
-      ? `investors now pay ${fmtPct(mc / 100)} more for the same amount of profit than they did a year ago`
-      : `investors now pay ${fmtPct(Math.abs(mc) / 100)} less for the same amount of profit than they did a year ago`;
-    reading =
-      `Put together: ${direction}` +
-      (dd != null
-        ? `, and the price sits ${fmtPct(Math.abs(dd) / 100)} below its highest point of the past year. `
-        : ". ");
+    sentences.push(
+      flat
+        ? "So investors pay about what they did a year ago for the same profit."
+        : `So investors now pay ${pct(Math.abs(mc))} ${mc > 0 ? "more" : "less"} for the same profit than a year ago.`
+    );
     if (dd != null && dd <= -25) {
-      reading += flat
-        ? "So the fall has brought the price back into line with profits — on this measure the earlier high was the unusual part, not the drop."
-        : mc < 0
-        ? "So even after the fall, profits grew while the price got cheaper relative to them — the mismatch behind a recovery idea, where you're betting a fallen price comes back."
-        : "So even after the fall, the share still costs more relative to its profits than it did a year ago.";
+      sentences.push(
+        flat
+          ? `The price is ${pct(Math.abs(dd))} below its 12-month high, so the fall mostly undid an unusually high peak.`
+          : mc < 0
+          ? `The price is ${pct(Math.abs(dd))} below its 12-month high — profit grew while the share got cheaper, the mismatch a recovery bet looks for.`
+          : `The price is ${pct(Math.abs(dd))} below its 12-month high and still costs more relative to profit than a year ago.`
+      );
     }
-    reading += " ";
   }
 
   return `
     <div class="risk-badge">
-      <strong>Price vs. profits: <span class="${cls}">${label}</span></strong>
-      <span class="subtitle">${facts.join(" · ")}. ${reading}This can't tell you whether a fall has finished — it describes the situation, not the timing.</span>
+      <strong>Price vs. profits: <span class="${cls}">${fundamentalsLabel(f)}</span></strong>
+      <span class="subtitle">${sentences.join(" ")} It can't say whether a fall is over.</span>
     </div>`;
 }
 
