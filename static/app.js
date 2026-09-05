@@ -2026,7 +2026,7 @@ function renderRiskContext() {
     bits.push(
       `<li>Your holdings already include one bloc that moves together: <strong>${g.tickers.join(
         " · "
-      )}</strong>, ${fmtPct(g.weight_pct / 100)} of the portfolio. Does ${riskTicker.ticker} belong with them?</li>`
+      )}</strong>, ${fmtPct(g.weight_pct / 100)} of the portfolio.</li>`
     );
   }
   const b = lastBreadth;
@@ -2054,9 +2054,37 @@ function renderRiskContext() {
       `<li>It has moved ${coloredPct(move)} since you put it on the list on ${riskTicker.added_date}.</li>`
     );
   }
-  host.innerHTML = bits.length
-    ? `<ul class="checklist-context">${bits.join("")}</ul>`
-    : `<p class="subtitle">Nothing recorded yet to compare against.</p>`;
+  bits.push(
+    `<li id="overlap-slot">Does it move with what you already hold? <button class="secondary" onclick="checkOverlap()">Check</button> <span class="subtitle">uses one Alpha Vantage call the first time each day</span></li>`
+  );
+  host.innerHTML = `<ul class="checklist-context">${bits.join("")}</ul>`;
+}
+
+// Answers the overlap question rather than asking it. Kept behind a button because it spends
+// from the 25/day Alpha Vantage budget the first time a ticker is checked on a given day.
+async function checkOverlap() {
+  const slot = document.getElementById("overlap-slot");
+  if (!slot || !riskTicker) return;
+  slot.innerHTML = "Checking…";
+  try {
+    const res = await fetch(`/api/concentration/compare/${riskTicker.ticker}`);
+    const d = await res.json();
+    if (!res.ok || d.error) {
+      slot.innerHTML = `<span class="subtitle">Couldn't check: ${d.detail || d.error}</span>`;
+      return;
+    }
+    const top = d.pairs.slice(0, 3).map((p) => `${p.ticker} ${fmt(p.correlation)}`).join(" · ");
+    const verdict = d.joins_group
+      ? `<span class="price-down">It moves with your ${d.joins_group.join(" · ")} bloc</span>, which would take that group past ${fmtPct(
+          d.joins_group_weight_pct / 100
+        )} of the portfolio.`
+      : d.pairs[0].correlation >= 0.35
+      ? `<span>It leans towards your existing holdings without clearly joining them.</span>`
+      : `<span class="price-up">It moves largely on its own</span> relative to what you hold.`;
+    slot.innerHTML = `${verdict}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
+  } catch (e) {
+    slot.innerHTML = `<span class="subtitle">Couldn't check: ${e.message || e}</span>`;
+  }
 }
 
 let thesisHoldingId = null;

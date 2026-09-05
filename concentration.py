@@ -119,6 +119,77 @@ def _down_day_behaviour(returns_by_ticker: dict, dates: list, portfolio: list) -
     }
 
 
+def compare_candidate(ticker: str, holdings: list, history: list, sales: Optional[list] = None) -> dict:
+    """Would buying this add to an existing bloc, or genuinely diversify?
+
+    `analyze()` can only group things already held, because holdings_history records only
+    holdings. A candidate needs its own daily series, so this fetches one from Alpha Vantage
+    (cached per ticker per day) and lines it up against the recorded values.
+
+    Sector is deliberately not used: GICS files the user's own AI bloc under two different
+    sectors and leaves one member unclassified, so it answers a different question than
+    "do these move together".
+
+    Caveat carried through to the UI: recorded holding values are EUR while the candidate's
+    closes are USD, so currency movement leaks into the comparison. Small against three weeks
+    of equity moves, but not nothing."""
+    import alpha_vantage  # local import: only this path needs it, and it costs API budget
+
+    ticker = ticker.upper()
+    if any(h["ticker"] == ticker for h in holdings):
+        return {"error": f"You already hold {ticker}."}
+
+    base = analyze(holdings, history, sales)
+    if base.get("error"):
+        return base
+
+    dates = sorted({p["date"] for p in history})
+    by_ticker = collections.defaultdict(dict)
+    for p in history:
+        by_ticker[p["ticker"]][p["date"]] = p["value"]
+
+    bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
+    closes = {b["date"]: b["close"] for b in bars}
+
+    shared = [d for d in dates if d in closes]
+    if len(shared) < MIN_WORST_DAYS * 2:
+        return {"error": f"Not enough overlapping days to compare {ticker} against your holdings."}
+
+    candidate = _returns([closes[d] for d in shared])
+    held = {h["ticker"]: h for h in holdings}
+    sales = sales or []
+
+    pairs = []
+    for other in sorted(by_ticker):
+        if other not in held or _changed_shares(held[other], sales, shared[0]):
+            continue
+        values = [by_ticker[other].get(d) for d in shared]
+        if any(v is None for v in values):
+            continue
+        series = _returns(values)
+        if len(series) != len(candidate):
+            continue
+        pairs.append({"ticker": other, "correlation": _correlation(candidate, series)})
+
+    if not pairs:
+        return {"error": f"No holding has a comparable run of days against {ticker}."}
+
+    pairs.sort(key=lambda p: -p["correlation"])
+    linked = [p["ticker"] for p in pairs if p["correlation"] >= CORRELATION_THRESHOLD]
+    joins = next(
+        (g for g in base["groups"] if any(t in linked for t in g["tickers"])),
+        None,
+    )
+    return {
+        "ticker": ticker,
+        "days": len(candidate),
+        "pairs": pairs,
+        "linked": linked,
+        "joins_group": joins["tickers"] if joins else None,
+        "joins_group_weight_pct": joins["weight_pct"] if joins else None,
+    }
+
+
 def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict:
     sales = sales or []
     if not holdings or not history:
