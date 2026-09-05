@@ -119,7 +119,8 @@ def _down_day_behaviour(returns_by_ticker: dict, dates: list, portfolio: list) -
     }
 
 
-def compare_candidate(ticker: str, holdings: list, history: list, sales: Optional[list] = None) -> dict:
+def compare_candidate(ticker: str, holdings: list, history: list, sales: Optional[list] = None,
+                      watchlist_history: Optional[list] = None) -> dict:
     """Would buying this add to an existing bloc, or genuinely diversify?
 
     `analyze()` can only group things already held, because holdings_history records only
@@ -149,8 +150,15 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     for p in history:
         by_ticker[p["ticker"]][p["date"]] = p["value"]
 
-    bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
-    closes = {b["date"]: b["close"] for b in bars}
+    # Prefer the series this tool records itself: Finnhub's free tier serves no price history
+    # (candles 403), so the fallback is Alpha Vantage against a 25/day cap. Once the watch list
+    # has been refreshed on enough days, the comparison costs nothing.
+    closes = {p["date"]: p["price"] for p in (watchlist_history or []) if p["ticker"] == ticker}
+    source = "recorded"
+    if len({d for d in dates if d in closes}) < MIN_WORST_DAYS * 2:
+        bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
+        closes = {b["date"]: b["close"] for b in bars}
+        source = "alpha vantage"
 
     # Market series first: if it's available, restrict to days all three cover rather than
     # requiring the market to have every date — that feed lags a day or two, so demanding a
@@ -211,6 +219,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
         "joins_group": joins["tickers"] if joins else None,
         "joins_group_weight_pct": joins["weight_pct"] if joins else None,
         "market_adjusted": bool(market_returns),
+        "source": source,
     }
 
 
