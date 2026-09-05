@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import alpha_vantage
+import breadth
 import concentration
 import consensus_store
 import ls_tc
@@ -1105,6 +1106,15 @@ def update_holding_thesis(holding_id: str, body: ThesisIn):
         holding["source_url"] = clean_source_url(body.source_url)
     save_holdings(holdings)
     return holding
+
+
+@app.get("/api/breadth")
+def get_breadth():
+    """How many stocks are participating. Third-party public CSV, cached once a day."""
+    try:
+        return breadth.summary()
+    except breadth.BreadthError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/api/concentration")

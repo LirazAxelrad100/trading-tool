@@ -131,7 +131,7 @@ replacement.
 5. **Risk preview on Watch List items** ✅ BUILT (2026-09-05), see CLAUDE.md — before buying, show "at today's price with a 15% stop,
    a full position of €X puts €Y at risk, Z% of the portfolio". This is the genuinely borrowable
    half of `breakout-trade-planner`: arithmetic about a hypothetical, no buy/qty/conviction.
-6. **`market-breadth-analyzer`** (from the skills library) — free public CSV, no API key, one
+6. **`market-breadth-analyzer`** ✅ BUILT (2026-09-05) as `breadth.py`, see CLAUDE.md. The skill's 6-component 0-100 composite was **not** adopted — an opaque weighted score the user would have to trust, where two plain percentages say the same thing and can be checked. Was: — free public CSV, no API key, one
    fetch/day, zero per-ticker cost. Scores 0–100 whether a rally is broad or narrow. Relevant
    because breakout setups fail disproportionately when breadth is narrow.
 7. **Static pre-trade checklist in the UI.** Decided (2026-09-04) that the *static* questions

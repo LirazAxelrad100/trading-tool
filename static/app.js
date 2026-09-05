@@ -277,6 +277,41 @@ async function loadPriceChart(containerId, ticker) {
   }
 }
 
+async function loadBreadth() {
+  const container = document.getElementById("breadth");
+  if (!container) return;
+  try {
+    const res = await fetch("/api/breadth");
+    if (!res.ok) throw new Error((await res.json()).detail || "unavailable");
+    renderBreadth(await res.json());
+  } catch (e) {
+    container.innerHTML = `<p class="empty">Breadth data unavailable: ${e.message || e}</p>`;
+  }
+}
+
+function renderBreadth(b) {
+  const container = document.getElementById("breadth");
+  const arrow = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
+  // 50% is the natural dividing line: below it, more stocks are falling than rising against
+  // that average, whatever the index itself is doing.
+  const shortNarrow = b.above_50d < 50;
+  const reading = shortNarrow
+    ? "Fewer than half of stocks are above their short-term average, so recent gains are being carried by a minority of names rather than the market as a whole."
+    : b.above_50d_change < -10
+    ? "Short-term participation is falling quickly even though most stocks are still above the line — fewer names are joining in than a month ago."
+    : "Most stocks are above both averages, so gains are broadly shared rather than concentrated in a few names.";
+
+  container.innerHTML = `
+    <table class="mini-table"><tbody>
+      <tr><td>Above their 200-day average</td><td><strong>${fmtPct(b.above_200d / 100)}</strong> of US stocks</td>
+          <td class="subtitle">${arrow(b.above_200d_change)} ${fmtPct(Math.abs(b.above_200d_change) / 100)} in a month</td></tr>
+      <tr><td>Above their 50-day average</td><td><strong>${fmtPct(b.above_50d / 100)}</strong></td>
+          <td class="subtitle">${arrow(b.above_50d_change)} ${fmtPct(Math.abs(b.above_50d_change) / 100)} in a month</td></tr>
+    </tbody></table>
+    <p>${reading}</p>
+    <p class="subtitle">As of ${b.as_of}, compared with ${b.compared_with}. Third-party public data (TraderMonty), fetched once a day — it lags by a day or two and could stop updating, so check the date if it looks frozen.</p>`;
+}
+
 async function loadConcentration() {
   const container = document.getElementById("concentration");
   if (!container) return;
@@ -509,6 +544,7 @@ async function seedPortfolioHistory() {
     const data = await res.json();
     await loadPortfolioChart();
     await loadConcentration();
+    await loadBreadth();
     alert(`Added ${data.seeded} approximate past points.`);
   } finally {
     btn.disabled = false;
@@ -1306,6 +1342,7 @@ async function refreshAllPrices() {
     }
     await loadPortfolioChart(); // refresh-all recorded a new daily point
     await loadConcentration();
+    await loadBreadth();
     await loadWeeklyTable();
   } finally {
     btn.disabled = false;
@@ -2141,4 +2178,4 @@ async function removeSalesEntry(id) {
 }
 
 initInfoTooltips();
-loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration());
+loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration()).then(() => loadBreadth());
