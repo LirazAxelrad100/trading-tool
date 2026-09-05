@@ -460,7 +460,6 @@ def delete_sales_entry(entry_id: str):
 
 class WatchlistIn(BaseModel):
     ticker: str
-    tag: str = ""
     source_url: str = ""
     why: str = ""
 
@@ -468,10 +467,8 @@ class WatchlistIn(BaseModel):
 class WatchlistMetaIn(BaseModel):
     """Every field optional so one endpoint serves each inline edit independently —
     omitting a field leaves it untouched rather than blanking it."""
-    tag: Optional[str] = None
     source_url: Optional[str] = None
     why: Optional[str] = None
-    note: Optional[str] = None
 
 
 def clean_source_url(url: str) -> str:
@@ -495,20 +492,25 @@ def load_watchlist() -> list[dict]:
     items = json.loads(WATCHLIST_FILE.read_text())
     migrated = False
     for it in items:
-        if "tag" not in it:
-            # Every note written before this feature existed was a source label — "zacks
-            # report ai bubble", "zacks recommendation / gold" — never reasoning, so they
-            # belong in the tag. Moving them frees `why` for what the note never held.
-            it["tag"] = (it.pop("note", "") or "").strip()
+        if "why" not in it or "tag" in it:
+            # One free-text field, not a tag plus a note. A separate tag only pays off if
+            # its wording stays consistent, and the user maintains it by hand across
+            # sources that vary — so the split was dropped and anything already written
+            # (including the older `note`) folds into `why`.
+            parts = [
+                (it.pop("tag", "") or "").strip(),
+                (it.pop("note", "") or "").strip(),
+                (it.get("why") or "").strip(),
+            ]
+            it["why"] = " — ".join(dict.fromkeys(p for p in parts if p))
             it.setdefault("source_url", "")
-            it.setdefault("why", "")
-            it.setdefault("note", "")
             # Items added before the entry snapshot existed have no honest value to
             # backfill — reconstructing it would cost API budget for a guess.
             it.setdefault("price_at_add", None)
             it.setdefault("score_at_add", None)
             it.setdefault("consensus_at_add", None)
             migrated = True
+        it.pop("momentum", None)
     if migrated:
         save_watchlist(items)
     return items
@@ -534,20 +536,18 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
     shape = prices.fetch_quote_shape(ticker)
     data = {
         "current_price": shape["close"] * rate,
+        # Today's move sits alongside 1W and 3M as the same kind of number, rather than as
+        # a separate "momentum" concept — one consistent trio of trailing returns.
+        "move_1d": shape.get("day_change_pct"),
         "move_1w": None,
         "move_3m": None,
         "score": None,
         "consensus": None,
-        "momentum": None,
         "last_refreshed": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        metrics = prices.fetch_metrics(ticker)
-        returns = prices.returns_from_metrics(metrics)
+        returns = prices.returns_from_metrics(prices.fetch_metrics(ticker))
         data["move_1w"], data["move_3m"] = returns["move_1w"], returns["move_3m"]
-        # Both inputs come from calls this refresh already makes, so scanning the whole
-        # watchlist for burst signals costs no extra API budget.
-        data["momentum"] = momentum.from_finnhub(shape, metrics)
     except PriceError:
         pass
     try:
@@ -591,10 +591,8 @@ def add_watchlist_item(item: WatchlistIn):
         "id": str(uuid.uuid4()),
         "ticker": ticker,
         "added_date": date.today().isoformat(),
-        "tag": item.tag.strip(),
         "source_url": clean_source_url(item.source_url),
         "why": item.why.strip(),
-        "note": "",
         "price_at_add": data.get("current_price"),
         "score_at_add": (data.get("score") or {}).get("composite"),
         "consensus_at_add": (data.get("consensus") or {}).get("average"),
@@ -617,14 +615,10 @@ def delete_watchlist_item(item_id: str):
 def update_watchlist_meta(item_id: str, body: WatchlistMetaIn):
     items = load_watchlist()
     watch_item = find_watch_item(items, item_id)
-    if body.tag is not None:
-        watch_item["tag"] = body.tag.strip()
     if body.source_url is not None:
         watch_item["source_url"] = clean_source_url(body.source_url)
     if body.why is not None:
         watch_item["why"] = body.why.strip()
-    if body.note is not None:
-        watch_item["note"] = body.note
     save_watchlist(items)
     return watch_item
 

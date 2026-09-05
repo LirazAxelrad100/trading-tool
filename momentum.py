@@ -8,19 +8,13 @@ synthesis.py's SYSTEM_PROMPT — words like "breakout" read as a recommendation 
 LLM narrates them, whereas a badge showing "+22% over 5 days, closed mid-range" leaves
 the reading to the user.
 
-Two tiers, because two surfaces have different data:
-  - `from_finnhub()` — Watch List. Runs off the /quote + /stock/metric calls a refresh
-    already makes, so scanning every row costs nothing extra. Finnhub's /quote carries no
-    volume field, so there is no true volume-spike or range-expansion read here.
-  - `from_daily_bars()` — Analyze. Uses the Alpha Vantage OHLCV history already fetched
-    for the volatility badge and price chart, which adds volume vs. the 50-day average
-    and range expansion vs. recent days.
+Reads today's live quote plus Finnhub's trailing metrics — both already fetched where it
+is used, so it costs nothing extra. An earlier Alpha Vantage daily-bars tier added volume
+vs. the 50-day average and range expansion, but those bars lag a day, so the badge kept
+describing yesterday while calling it today; it was dropped in favour of one live read.
 """
 
-import statistics
 from typing import Optional
-
-import alpha_vantage
 
 # Bonde's third trigger, a "dollar breakout" (close - open >= $0.90), is deliberately not
 # implemented: it was written for low-priced stocks, and on the high-priced US names in this
@@ -124,58 +118,5 @@ def from_finnhub(shape: dict, metrics: dict) -> dict:
         "run_up_5d_pct": run_up_5d,
         "ret_3m_pct": ret_3m,
         "volume_elevation": vol_elevation,
-        "pct_from_52w_high": pct_from_high,
-    }
-
-
-def from_daily_bars(ticker: str, days: int = 90, metrics: Optional[dict] = None) -> dict:
-    """Analyze tier. Reuses alpha_vantage's per-ticker-per-day cache, so it costs nothing
-    extra when the volatility badge or price chart already fetched this ticker today.
-
-    `metrics` is prices.fetch_metrics() output, used only for trend context. It is passed in
-    rather than derived from the bars so that both tiers judge trend from the same two
-    numbers — the 52-week high and the 13-week return — and cannot disagree with each other
-    about the same ticker (the problem consensus_store.py exists to solve). The 90 bars here
-    could only support a 90-day high, which is a different question."""
-    bars = alpha_vantage.fetch_daily_prices(ticker, days=days)
-    if len(bars) < RANGE_LOOKBACK + 2:
-        return {"error": "Not enough price history for momentum signals."}
-    if any(b.get("volume") is None for b in bars[-VOLUME_LOOKBACK - 1:]):
-        # Cached earlier today under the old close-only format; refetching would burn an
-        # Alpha Vantage call for a secondary badge. Self-heals on tomorrow's refetch.
-        return {"error": "Price history cached before volume was tracked — available tomorrow."}
-
-    today, prev = bars[-1], bars[-2]
-    day_change = (today["close"] / prev["close"] - 1) * 100
-
-    prior_volumes = [b["volume"] for b in bars[-VOLUME_LOOKBACK - 1:-1]]
-    avg_volume = statistics.mean(prior_volumes) if prior_volumes else None
-    volume_ratio = today["volume"] / avg_volume if avg_volume else None
-
-    today_range = today["high"] - today["low"]
-    prior_ranges = [b["high"] - b["low"] for b in bars[-RANGE_LOOKBACK - 1:-1]]
-    range_expansion = bool(prior_ranges) and today_range > max(prior_ranges)
-
-    run_up_5d = (today["close"] / bars[-6]["close"] - 1) * 100 if len(bars) >= 6 else None
-
-    # Bonde's 4% breakout wants volume behind the move, not just the move.
-    breakout = day_change >= BREAKOUT_PCT and today["volume"] > prev["volume"]
-    extended = run_up_5d is not None and run_up_5d >= EXTENDED_5D_PCT
-
-    m = metrics or {}
-    ret_3m = m.get("13WeekPriceReturnDaily")
-    pct_from_high = pct_from_52w_high(today["close"], m.get("52WeekHigh"), m.get("52WeekLow"))
-
-    return {
-        "source": "daily bars",
-        "state": _state(breakout, extended, day_change),
-        "trend": _trend(ret_3m, pct_from_high),
-        "as_of": today["date"],
-        "day_change_pct": day_change,
-        "close_location": _close_location(today["close"], today["high"], today["low"]),
-        "run_up_5d_pct": run_up_5d,
-        "ret_3m_pct": ret_3m,
-        "volume_ratio": volume_ratio,
-        "range_expansion": range_expansion,
         "pct_from_52w_high": pct_from_high,
     }

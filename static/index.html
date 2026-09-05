@@ -179,13 +179,8 @@
       <h2>Add to watch list</h2>
       <div class="add-form">
         <div><label>Ticker</label><input id="watch-ticker-input" placeholder="AAPL" /></div>
-        <div>
-          <label>Tag <span class="info" tabindex="0">i<span class="tooltip">Where the idea came from, e.g. "zacks report ai bubble". Reusing a tag groups those tickers together as one bet — pick a previous tag from the list instead of retyping.</span></span></label>
-          <input id="watch-tag-input" list="watch-tag-options" placeholder="zacks report ai bubble" />
-          <datalist id="watch-tag-options"></datalist>
-        </div>
         <div><label>Source link</label><input id="watch-url-input" placeholder="https://…" /></div>
-        <div><label>Why <span class="info" tabindex="0">i<span class="tooltip">The reasoning in your own words — a TLDR of the source is plenty. Optional, but it's the part you can't reconstruct later.</span></span></label><input id="watch-why-input" placeholder="What convinced you?" /></div>
+        <div><label>Why <span class="info" tabindex="0">i<span class="tooltip">Your reasoning — a TLDR of the source is plenty. Add #tags (e.g. #ai-bubble) to group tickers that came from the same idea; typing a new one creates it.</span></span></label><input id="watch-why-input" placeholder="Why — use #tags to group" /></div>
         <button id="watch-add-btn" onclick="addWatchItem()">Add</button>
       </div>
     </div>
@@ -196,6 +191,7 @@
         <button id="watch-refresh-all-btn" class="secondary" onclick="refreshAllWatchlist()">Refresh all</button>
       </div>
       <p class="subtitle">Stocks you're considering but haven't bought — manually added and removed. Sorted, not ranked as advice.</p>
+      <div id="watch-tag-filters" class="tag-filters"></div>
       <div class="table-scroll">
       <table id="watchlist-table">
         <thead>
@@ -204,12 +200,11 @@
             <th>Added</th>
             <th>Price</th>
             <th class="sortable" onclick="watchSortBy('score')">Score <span id="watch-arrow-score" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>0–100 Opportunities B score</strong> — same analyst-conviction + earnings-beats + drift composite as the Opportunities B tab, computed live for this ticker. Not a verdict.</span></span></th>
+            <th class="sortable" onclick="watchSortBy('move_1d')">1D % <span id="watch-arrow-move_1d" class="arrow"></span></th>
             <th class="sortable" onclick="watchSortBy('move_1w')">1W % <span id="watch-arrow-move_1w" class="arrow"></span></th>
             <th class="sortable" onclick="watchSortBy('move_3m')">3M % <span id="watch-arrow-move_3m" class="arrow"></span></th>
-            <th class="sortable" onclick="watchSortBy('momentum')">Momentum <span id="watch-arrow-momentum" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip"><strong>Recent price/volume behaviour</strong> — <strong>Burst</strong> = up 4%+ today; <strong>Extended</strong> = up 20%+ over the last 5 days, so most of the move has already happened. Hover a cell for the underlying numbers. Descriptive only: it says what just happened, not what happens next.</span></span></th>
             <th>Zacks / Cons. <span class="info" tabindex="0"><span class="tooltip"><strong>Zacks Rank / analyst consensus average.</strong> Zacks Rank: 1 (Strong Buy) to 5 (Strong Sell), from your last CSV import — dash if this ticker isn't in it. Consensus average: same 1–5 scale, from live analyst ratings fetched on refresh.</span></span></th>
-            <th class="sortable" onclick="watchSortBy('tag')">Tag <span id="watch-arrow-tag" class="arrow"></span><span class="info" tabindex="0" onclick="event.stopPropagation()">i<span class="tooltip">Where the idea came from. Tickers sharing a tag came from the same source — sort by this to see whether several rows are really one bet.</span></span></th>
-            <th>Why</th>
+            <th>Why <span class="info" tabindex="0">i<span class="tooltip">Your reasoning, plus #tags to group tickers from the same idea. Click a tag above the table to filter.</span></span></th>
             <th></th>
           </tr>
         </thead>
