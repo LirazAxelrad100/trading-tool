@@ -31,6 +31,7 @@ SALES_HISTORY_FILE = Path(__file__).parent / "data" / "sales_history.json"
 PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.json"
 HOLDINGS_HISTORY_FILE = Path(__file__).parent / "data" / "holdings_history.json"
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
+WATCHLIST_HISTORY_FILE = Path(__file__).parent / "data" / "watchlist_history.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -164,6 +165,31 @@ def record_holdings_snapshot(holdings: list[dict]) -> None:
             continue
         points.append({"date": today, "ticker": h["ticker"], "value": value})
     save_holdings_history(points)
+
+
+def load_watchlist_history() -> list[dict]:
+    if not WATCHLIST_HISTORY_FILE.exists():
+        return []
+    return json.loads(WATCHLIST_HISTORY_FILE.read_text())
+
+
+def record_watchlist_snapshot(items: list[dict]) -> None:
+    """One price point per watch-list ticker per day, mirroring record_holdings_snapshot().
+
+    Finnhub's free tier serves no price history at all (`stock/candle` and `stock/tick` both
+    403 — live-tested 2026-09-05), so comparing a candidate against holdings has meant an
+    Alpha Vantage call against a 25/day cap. Every refresh already fetches a price, so
+    recording it builds the same series for nothing, and the comparison stops needing Alpha
+    Vantage once enough days accumulate — the same trick holdings_history already uses."""
+    today = date.today().isoformat()
+    points = [p for p in load_watchlist_history() if p["date"] != today]
+    for it in items:
+        price = it.get("current_price")
+        if not price:
+            continue
+        points.append({"date": today, "ticker": it["ticker"], "price": price})
+    points.sort(key=lambda p: (p["date"], p["ticker"]))
+    WATCHLIST_HISTORY_FILE.write_text(json.dumps(points, indent=2))
 
 
 class HoldingIn(BaseModel):
@@ -676,6 +702,7 @@ def refresh_all_watchlist():
             time.sleep(1)
 
     save_watchlist(items)
+    record_watchlist_snapshot(items)  # builds a free price series for candidate comparisons
     return {"items": items, "errors": errors}
 
 
@@ -1148,7 +1175,8 @@ def compare_concentration(ticker: str):
     first time a ticker is checked on a given day, so it's triggered on demand, not on load."""
     try:
         return concentration.compare_candidate(
-            ticker, load_holdings(), load_holdings_history(), load_sales_history()
+            ticker, load_holdings(), load_holdings_history(), load_sales_history(),
+            watchlist_history=load_watchlist_history(),
         )
     except AlphaVantageError as e:
         raise HTTPException(status_code=502, detail=str(e))
