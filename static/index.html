@@ -256,6 +256,21 @@
 
   </div>
 
+  <div id="risk-modal" class="modal-overlay" onclick="if(event.target===this) closeRiskModal()">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="risk-modal-title"></h2>
+        <button class="secondary" onclick="closeRiskModal()">Close</button>
+      </div>
+      <p class="subtitle">If you bought this, what would be at stake? Arithmetic only — it doesn't suggest an amount.</p>
+      <div class="add-form">
+        <div><label>Amount to invest (EUR)</label><input id="risk-amount" type="text" inputmode="decimal" placeholder="5.000" oninput="renderRiskPreview()" /></div>
+        <div><label>Stop <span id="risk-stop-hint" class="subtitle"></span></label><input id="risk-stop" type="text" inputmode="decimal" value="10" oninput="renderRiskPreview()" /></div>
+      </div>
+      <div id="risk-output"></div>
+    </div>
+  </div>
+
   <div id="thesis-modal" class="modal-overlay" onclick="if(event.target===this) closeThesisModal()">
     <div class="modal-box">
       <div class="modal-header">
