@@ -2021,27 +2021,13 @@ async function saveChecklist() {
 function renderRiskContext() {
   const host = document.getElementById("risk-context");
   if (!host || !riskTicker) return;
+  // Every line here must be about *this* stock. Earlier versions opened with the portfolio's
+  // largest bloc and the market's breadth figure, which were identical on every ticker — they
+  // read as facts about the stock while being facts about the portfolio, and the Check button
+  // already reports both stock-specifically (naming the bloc, and giving the breadth share as
+  // the denominator for where this one sits).
   const bits = [];
 
-  const c = lastConcentration;
-  if (c && c.groups && c.groups.length) {
-    const g = c.groups[0];
-    bits.push(
-      `<li>Your holdings already include one bloc that moves together: <strong>${g.tickers.join(
-        " · "
-      )}</strong>, ${fmtPct(g.weight_pct / 100)} of the portfolio.</li>`
-    );
-  }
-  const b = lastBreadth;
-  if (b) {
-    bits.push(
-      `<li>Across the market, <strong>${fmtPct(
-        b.above_50d / 100
-      )}</strong> of US stocks are rising lately (trading above their average price of the last 50 days), against ${fmtPct(
-        b.above_50d_prev / 100
-      )} a month ago.</li>`
-    );
-  }
   // Uses move_3m rather than the momentum object — watch-list rows stopped carrying one when
   // the Momentum column was replaced by 1D/1W/3M.
   if (typeof riskTicker.move_3m === "number" && riskTicker.move_3m <= -20) {
@@ -2050,6 +2036,22 @@ function renderRiskContext() {
         Math.abs(riskTicker.move_3m) / 100
       )} over 3 months — buying now is a bet on a turn, not on continuation.</li>`
     );
+  }
+  for (const tag of watchHashtags(riskTicker)) {
+    const peers = watchlist.filter((w) => w.id !== riskTicker.id && watchHashtags(w).includes(tag));
+    if (!peers.length) continue;
+    const m3 = avg(peers.map((w) => w.move_3m));
+    const m12 = avg(peers.map((w) => w.move_12m));
+    const stage = themeStage(m12, m3);
+    if (stage) {
+      bits.push(
+        `<li>You tagged it <strong>${escapeHtml(tag)}</strong>, alongside ${peers
+          .map((w) => w.ticker)
+          .join(" · ")} — that group: <span class="${THEME_STAGES[stage].cls}">${
+          THEME_STAGES[stage].label
+        }</span>.</li>`
+      );
+    }
   }
   if (riskTicker.price_at_add != null && riskTicker.current_price != null) {
     const move = (riskTicker.current_price / riskTicker.price_at_add - 1) * 100;
