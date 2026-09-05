@@ -1132,6 +1132,16 @@ def get_breadth():
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/breadth/position/{ticker}")
+def get_breadth_position(ticker: str):
+    """Which side of the market figure this one stock is on. Shares alpha_vantage's per-day
+    cache with the overlap check, so asking for both costs one call, not two."""
+    try:
+        return breadth.stock_position(ticker)
+    except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/concentration/compare/{ticker}")
 def compare_concentration(ticker: str):
     """Does a candidate move with what's already held? Costs one Alpha Vantage call the
