@@ -1132,6 +1132,18 @@ def get_breadth():
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/concentration/compare/{ticker}")
+def compare_concentration(ticker: str):
+    """Does a candidate move with what's already held? Costs one Alpha Vantage call the
+    first time a ticker is checked on a given day, so it's triggered on demand, not on load."""
+    try:
+        return concentration.compare_candidate(
+            ticker, load_holdings(), load_holdings_history(), load_sales_history()
+        )
+    except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/concentration")
 def get_concentration():
     """Which holdings move together. Reads only stored history, so it costs no API calls."""
