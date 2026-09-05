@@ -294,22 +294,25 @@ let lastBreadth = null;
 function renderBreadth(b) {
   lastBreadth = b;
   const container = document.getElementById("breadth");
-  const arrow = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
   // 50% is the natural dividing line: below it, more stocks are falling than rising against
   // that average, whatever the index itself is doing.
-  const shortNarrow = b.above_50d < 50;
-  const reading = shortNarrow
-    ? "Fewer than half of stocks are above their short-term average, so recent gains are being carried by a minority of names rather than the market as a whole."
-    : b.above_50d_change < -10
-    ? "Short-term participation is falling quickly even though most stocks are still above the line — fewer names are joining in than a month ago."
-    : "Most stocks are above both averages, so gains are broadly shared rather than concentrated in a few names.";
+  const narrow = b.above_50d < 50;
+  const shrinking = b.above_50d < b.above_50d_prev;
+  const reading = narrow
+    ? "So fewer than half of stocks are rising, and recent index gains are being carried by a minority of large names rather than the market as a whole."
+    : shrinking
+    ? "So most stocks are still rising, but fewer than a month ago — the advance is getting narrower."
+    : "So gains are broadly shared rather than concentrated in a few names.";
 
   container.innerHTML = `
+    <p>A stock trading above its own average price of the last 50 days has been rising lately; below it, falling. Counting how many are on each side says whether a market rise is shared or carried by a few.</p>
     <table class="mini-table"><tbody>
-      <tr><td>Above their 200-day average</td><td><strong>${fmtPct(b.above_200d / 100)}</strong> of US stocks</td>
-          <td class="subtitle">${arrow(b.above_200d_change)} ${fmtPct(Math.abs(b.above_200d_change) / 100)} in a month</td></tr>
-      <tr><td>Above their 50-day average</td><td><strong>${fmtPct(b.above_50d / 100)}</strong></td>
-          <td class="subtitle">${arrow(b.above_50d_change)} ${fmtPct(Math.abs(b.above_50d_change) / 100)} in a month</td></tr>
+      <tr><td>Rising lately (above their 50-day average)</td>
+          <td><strong>${fmtPct(b.above_50d / 100)}</strong> of US stocks</td>
+          <td class="subtitle">was ${fmtPct(b.above_50d_prev / 100)} a month ago</td></tr>
+      <tr><td>Rising over the longer run (above their 200-day average)</td>
+          <td><strong>${fmtPct(b.above_200d / 100)}</strong></td>
+          <td class="subtitle">was ${fmtPct(b.above_200d_prev / 100)} a month ago</td></tr>
     </tbody></table>
     <p>${reading}</p>
     <p class="subtitle">As of ${b.as_of}, compared with ${b.compared_with}. Third-party public data (TraderMonty), fetched once a day — it lags by a day or two and could stop updating, so check the date if it looks frozen.</p>`;
@@ -2034,9 +2037,9 @@ function renderRiskContext() {
     bits.push(
       `<li>Across the market, <strong>${fmtPct(
         b.above_50d / 100
-      )}</strong> of US stocks are above their 50-day average (${
-        b.above_50d_change < 0 ? "down" : "up"
-      } ${fmtPct(Math.abs(b.above_50d_change) / 100)} in a month).</li>`
+      )}</strong> of US stocks are rising lately (trading above their average price of the last 50 days), against ${fmtPct(
+        b.above_50d_prev / 100
+      )} a month ago.</li>`
     );
   }
   // Uses move_3m rather than the momentum object — watch-list rows stopped carrying one when

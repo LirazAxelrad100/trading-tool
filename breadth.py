@@ -99,8 +99,11 @@ def summary() -> dict:
         "as_of": latest["date"],
         "above_200d": latest["above_200d"],
         "above_50d": latest["above_50d"],
-        "above_200d_change": latest["above_200d"] - month_ago["above_200d"],
-        "above_50d_change": latest["above_50d"] - month_ago["above_50d"],
+        # Prior levels, not a delta: the change is in percentage *points* (64.9% -> 51.1%
+        # is 13.8 points, not 13.8 percent), and stating both levels avoids the confusion
+        # entirely rather than relying on the reader to catch the unit.
+        "above_200d_prev": month_ago["above_200d"],
+        "above_50d_prev": month_ago["above_50d"],
         "compared_with": month_ago["date"],
         "bearish_200": latest["bearish_200"],
         "bearish_50": latest["bearish_50"],
