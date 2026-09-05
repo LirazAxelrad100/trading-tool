@@ -671,60 +671,76 @@ function renderMomentum(m) {
 const MULTIPLE_FLAT_PCT = 10;
 
 function fundamentalsLabel(f) {
-  // The sign-only quadrant is too crude when both are positive: FN was price +9% against
-  // earnings +42%, which the quadrant calls "moving together" while the multiple fell 23%.
-  // When both rise, the multiple decides which of them outran the other.
-  if (f.quadrant === "divergence") return "Price down, earnings up";
-  if (f.quadrant === "both_falling") return "Price and earnings both falling";
-  if (f.quadrant === "multiple_expansion") return "Price up, earnings down";
+  // "Profits" rather than "earnings" throughout: same thing, but one of them is a word
+  // outside finance too. The sign-only quadrant is also too crude when both are positive —
+  // FN was price +9% against profits +42%, technically "both rising" while the valuation
+  // fell 23% — so when both rise, the valuation change decides which outran which.
+  if (f.quadrant === "divergence") return "Price fell while profits grew";
+  if (f.quadrant === "both_falling") return "Price and profits both falling";
+  if (f.quadrant === "multiple_expansion") return "Price rose while profits fell";
   const mc = f.multiple_change_pct;
-  if (mc == null || Math.abs(mc) < MULTIPLE_FLAT_PCT) return "Price and earnings moving together";
-  return mc < 0 ? "Earnings outgrew the price" : "Price outran earnings";
+  if (f.eps_base_distorted) return "Profits rebounding from a low base";
+  if (mc == null || Math.abs(mc) < MULTIPLE_FLAT_PCT) return "Price and profits moved together";
+  return mc < 0 ? "Profits grew faster than the price" : "Price rose faster than profits";
 }
 
 function renderFundamentals(f) {
   if (!f || f.error) {
-    return `<div class="risk-badge"><strong>Price vs. earnings: —</strong> <span class="subtitle">${
-      f && f.error ? f.error : "no fundamental data"
+    return `<div class="risk-badge"><strong>Price vs. profits: —</strong> <span class="subtitle">${
+      f && f.error ? f.error : "no profit figures available for this company"
     }</span></div>`;
   }
   const label = fundamentalsLabel(f);
   const cls = f.quadrant === "both_falling" ? "price-down" : f.quadrant === "divergence" ? "price-up" : "";
 
   const facts = [];
-  if (f.price_12m_pct != null) facts.push(`price ${fmtPct(f.price_12m_pct / 100)} over 12 months`);
-  if (f.eps_growth_pct != null) facts.push(`earnings per share ${fmtPct(f.eps_growth_pct / 100)}`);
-  if (f.revenue_growth_pct != null) facts.push(`revenue ${fmtPct(f.revenue_growth_pct / 100)}`);
-  if (f.pe_ttm != null) facts.push(`P/E ${fmt(f.pe_ttm)}`);
-  if (f.beats != null) facts.push(`beat estimates in ${f.beats} of ${f.beats + f.misses} recent quarters`);
+  if (f.price_12m_pct != null) facts.push(`share price ${fmtPct(f.price_12m_pct / 100)} over the past year`);
+  if (f.price_3m_pct != null) facts.push(`${fmtPct(f.price_3m_pct / 100)} over the past 3 months`);
+  if (f.eps_growth_pct != null) facts.push(`profit per share ${fmtPct(f.eps_growth_pct / 100)}`);
+  if (f.revenue_growth_pct != null) facts.push(`sales ${fmtPct(f.revenue_growth_pct / 100)}`);
+  // Both of these were jargon: "P/E 40,33" and "beat estimates in 4 of 4" assume the reader
+  // already knows what a multiple is and that analysts publish quarterly profit forecasts.
+  if (f.pe_ttm != null)
+    facts.push(`the share price is ${fmt(f.pe_ttm)}× the company's yearly profit per share (its "P/E")`);
+  if (f.beats != null)
+    facts.push(
+      `profits came in above analysts' forecasts in ${f.beats} of the last ${f.beats + f.misses} quarterly reports`
+    );
 
-  // The pairing carries the meaning: how the multiple moved over the year, next to how far
+  // The pairing carries the meaning: how the valuation moved over the year, next to how far
   // the price sits below its high. Either number alone is easy to misread.
   const mc = f.multiple_change_pct;
   const dd = f.pct_from_52w_high;
   let reading = "";
-  if (mc != null) {
-    const flat = Math.abs(mc) < MULTIPLE_FLAT_PCT;
-    const direction = flat ? "barely moved" : mc > 0 ? `rose ${fmtPct(mc / 100)}` : `fell ${fmtPct(Math.abs(mc) / 100)}`;
+  if (f.eps_base_distorted) {
     reading =
-      `Over 12 months the market's valuation of each dollar of earnings ${direction}` +
-      (dd != null ? `, and the price now sits ${fmtPct(Math.abs(dd) / 100)} below its 52-week high. ` : ". ");
+      "Profit per share grew so steeply here that it's almost certainly recovering from a very low base rather than expanding — which makes any comparison of price against profits over this period unreliable. Treat the figures above as raw numbers, not as a read on how the shares are valued. ";
+  } else if (mc != null) {
+    const flat = Math.abs(mc) < MULTIPLE_FLAT_PCT;
+    const direction = flat
+      ? "investors pay roughly what they did a year ago for the same amount of profit"
+      : mc > 0
+      ? `investors now pay ${fmtPct(mc / 100)} more for the same amount of profit than they did a year ago`
+      : `investors now pay ${fmtPct(Math.abs(mc) / 100)} less for the same amount of profit than they did a year ago`;
+    reading =
+      `Put together: ${direction}` +
+      (dd != null
+        ? `, and the price sits ${fmtPct(Math.abs(dd) / 100)} below its highest point of the past year. `
+        : ". ");
     if (dd != null && dd <= -25) {
       reading += flat
-        ? "So the fall has taken the valuation back to roughly where it was a year ago — on this measure the earlier peak was the unusual part, not the decline."
+        ? "So the fall has brought the price back into line with profits — on this measure the earlier high was the unusual part, not the drop."
         : mc < 0
-        ? "So even after the fall, the market pays less per dollar of earnings than a year ago while earnings grew — the divergence a recovery thesis looks for."
-        : "So despite the fall, the market still pays more per dollar of earnings than a year ago.";
+        ? "So even after the fall, profits grew while the price got cheaper relative to them — the mismatch behind a recovery idea, where you're betting a fallen price comes back."
+        : "So even after the fall, the share still costs more relative to its profits than it did a year ago.";
     }
     reading += " ";
   }
 
   return `
     <div class="risk-badge">
-      <strong>Price vs. earnings: <span class="${cls}">${label}</span></strong>
-      <span class="subtitle">${facts.join(" · ")}${
-    f.price_3m_pct != null ? ` · 3-month price ${fmtPct(f.price_3m_pct / 100)}` : ""
-  }. ${reading}Whether a decline has finished is not something this can tell you — it describes the setup, not the timing.</span>
+      <strong>Price vs. profits: <span class="${cls}">${label}</span></strong>
+      <span class="subtitle">${facts.join(" · ")}. ${reading}This can't tell you whether a fall has finished — it describes the situation, not the timing.</span>
     </div>`;
 }
 
