@@ -42,6 +42,13 @@ QUADRANTS = {
 }
 
 
+# Above this, year-over-year profit growth is almost always a recovery from a near-zero or
+# depressed base rather than real expansion, and the derived valuation change becomes
+# meaningless. Live case (GEV, 2026-09-05): profit per share +744% produced "investors pay
+# 81% less for the same profit" — arithmetically correct, practically nonsense.
+EPS_BASE_DISTORTION_PCT = 200
+
+
 def _multiple_change_pct(price_pct: float, eps_pct: float) -> Optional[float]:
     """How much the market's willingness to pay per dollar of earnings moved, derived
     rather than measured: price and earnings growth are both known, and P/E is their
@@ -63,7 +70,7 @@ def analyze(metrics: dict, earnings_history: Optional[list] = None,
     eps_pct = m.get("epsGrowthTTMYoy")
 
     if not isinstance(price_pct, (int, float)) or not isinstance(eps_pct, (int, float)):
-        return {"error": "Not enough fundamental data to compare price against earnings."}
+        return {"error": "Not enough data to compare this company's share price against its profits."}
 
     quadrant = QUADRANTS[(price_pct >= 0, eps_pct >= 0)]
 
@@ -90,6 +97,7 @@ def analyze(metrics: dict, earnings_history: Optional[list] = None,
         "eps_growth_pct": eps_pct,
         "revenue_growth_pct": m.get("revenueGrowthTTMYoy"),
         "multiple_change_pct": _multiple_change_pct(price_pct, eps_pct),
+        "eps_base_distorted": eps_pct > EPS_BASE_DISTORTION_PCT,
         "pe_ttm": m.get("peTTM"),
         "roe_ttm": m.get("roeTTM"),
         "debt_to_equity": m.get("totalDebt/totalEquityAnnual"),
