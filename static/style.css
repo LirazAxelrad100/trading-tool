@@ -266,3 +266,7 @@ th.sortable:hover { color: var(--text); }
 .tag-chip:hover { border-color: var(--accent, #6b8afd); }
 .tag-chip.active { border-color: var(--accent, #6b8afd); color: var(--accent, #6b8afd); }
 td.nowrap { white-space: nowrap; }
+
+/* Compact table inside a panel (down-day behaviour). */
+.mini-table { border-collapse: collapse; margin: 0.25rem 0 0.5rem; }
+.mini-table td { padding: 2px 14px 2px 0; }
