@@ -57,6 +57,26 @@ exposure, not a generic what-if. Purely descriptive/scenario math, no recommenda
 The earnings-reaction work above is now resolved (one piece shipped, the other dropped), so
 this is next up whenever risk-assessment work resumes.
 
+## Session close — 2026-09-05
+
+All eight backlog items are built. Three things worth carrying forward:
+
+- **Record our own history rather than buying it.** Finnhub's free tier serves no price
+  history (`stock/candle` and `stock/tick` both 403), and Alpha Vantage caps at 25/day — a cap
+  this session exhausted by looping over tickers during testing. Both holdings and watch-list
+  prices are now snapshotted daily, so correlation and trend features stop needing an external
+  budget once enough days accumulate. Apply the same idea before reaching for a paid tier.
+- **Correlation needs the market subtracted.** Raw correlation over a few weeks mostly measures
+  "most stocks fall on the days the market falls". The user noticed the symptom (different
+  tickers returning identical answers) before the cause was known. ONTO flipped from joining the
+  AI bloc to not once adjusted.
+- **Sample sizes are still small.** 13–21 shared days everywhere. Blocs are credible because
+  several holdings agree; single pairs are not. Everything firms up as the daily snapshots run.
+
+Open threads, not yet roadmap items: what to do with the money released if AMD is sold, and the
+200-day trend check (needs more history than the free tier gives — the tool's own recording will
+cover it by roughly mid-October).
+
 ## Momentum, themes and the recovery lens (September 2026)
 
 Context: reviewed `~/Documents/projects/claude-trading-skills` (a large set of GitHub trading

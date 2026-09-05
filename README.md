@@ -1,6 +1,6 @@
 # Trading Tool
 
-Local live tool for tracking holdings and manually-simulated trailing stops (Trade Republic / Scalable Capital don't support native trailing stops). Data lives in `data/holdings.json` on this machine only.
+Local tool for tracking holdings, manually-simulated trailing stops (Trade Republic / Scalable Capital don't support native ones), and the reasoning behind each position. Built for one user's real portfolio — it surfaces facts and never tells you what to buy or sell. Data stays on this machine only.
 
 ## Setup
 
@@ -32,7 +32,7 @@ Then open http://127.0.0.1:8000
 
 ## What's here
 
-- Two tabs: **My Stocks** (Add holding form, holdings table, breakout/stop-hit alerts) and **Opportunities** (Zacks Rank 1 table, CSV import, consensus refresh) — keeps either view short instead of one long scrolling page.
+- Five tabs: **My Stocks** (holdings, alerts, concentration and market-breadth panels, value-over-time chart), **Opportunities** (Zacks Rank 1), **Opportunities B** (analyst-conviction shortlist), **Watch List** (candidates, with thesis capture and a pre-buy checklist) and **History** (sales log) — keeps each view short instead of one long scrolling page.
 - Add/edit holdings: ticker, shares, buy in (cost basis), purchase date, stop loss, trailing high, exit plan. There's no plain "delete" — see **Sell & sales history** below for how a holding leaves the table.
 - **Multi-lot holdings**: a holding tracks each purchase as its own **lot** (shares, buy-in, date). The table shows the aggregate (total shares, weighted-average buy-in); a per-row **Lots** button opens a modal to view/add/edit/remove lots (a `(N lots)` link appears once there's more than one). **Selling is FIFO** — the oldest lot goes first — so realized gains and the estimated tax match your broker's (German capital-gains basis), instead of an average approximation. The sell preview shows the FIFO gain live. Buying more of a ticker you hold = adding a lot, not a new row.
 - **Runs automatically on page load** — matches the original brief's "check on every app open" design. No need to click anything; the summary panel below the table populates itself.
@@ -127,6 +127,22 @@ launchctl unload ~/Library/LaunchAgents/com.tradingtool.zackswatch.plist
 
 Note: `WatchPaths` fires on *any* change to `~/Downloads`, not just Zacks files — the script itself is a fast no-op unless a matching CSV actually changed, but it does wake up somewhat often if you download things frequently.
 
+### Decision support
+
+Everything here is descriptive. It surfaces facts and never says what to buy or sell.
+
+- **Analyze** (per ticker) opens a popup with a prose synthesis plus four standalone badges:
+  - *Volatility* — how much the price has actually swung, annualised. Backward-looking, labelled as such.
+  - *Today's momentum* — a sharp move up, an already-extended run, or a sharp fall — together with the trend underneath it, so a jump inside a decline reads as a bounce rather than a breakout.
+  - *Price vs. profits* — did the share price move with profits, or did one outrun the other? Shows how much of a gain came from the business earning more versus the market simply paying more, which is the lens every other signal here structurally misses.
+  - *Tensions* — deterministic contradiction flags (positive ratings against a sustained decline, a burst inside a downtrend, Zacks disagreeing with Opportunities B).
+- **Which holdings move together** — groups holdings by co-movement rather than by sector, since sector labels split a single bet across categories. Also shows how each behaved on the portfolio's worst days, because things that look independent day to day often fall together when it matters.
+- **How much of the market is participating** — the share of US stocks rising against their own recent average, so a broad advance can be told from one carried by a few names.
+- **Before you buy** (per watch-list row) — what a given amount would put at risk at a chosen stop, what the tool already knows (your largest correlated bloc, market breadth, whether this stock is rising, whether it moves with what you hold), and three fixed questions only you can answer.
+- **Thesis capture** — a free-text *why* plus an optional source link on both watch-list items and holdings, with `#tags` grouping tickers that came from the same idea. Buying a watched ticker carries its reasoning onto the position. Each #tag group is staged as *still working* or *was strong, now unwinding* from its own trailing returns.
+
+Prices for watch-list items and holdings are recorded once a day, so correlation and trend work builds its own history rather than spending an API budget on someone else's.
+
 ### Field definitions
 
 - **Buy in**: what you paid per share at purchase. Historical record only.
@@ -145,9 +161,8 @@ Note: `WatchPaths` fires on *any* change to `~/Downloads`, not just Zacks files 
 
 ## Not yet built
 
-- Full decision-support layer (earnings surprise history, estimate revisions — analyst consensus counts and Zacks Rank are in, the rest isn't)
-- Decumulation model
-- Watchlist (candidates you don't yet hold — Zacks Rank import + live price/consensus infrastructure already supports this, just needs a UI)
-- Position sizing, spread-cost estimator, concentration checks, tax-lot awareness (ported from the original claude.ai artifact)
+- Decumulation model (how much to draw down, and from where)
+- Spread-cost estimator
+- A 200-day trend check per stock — needs more price history than the free tier gives, and the tool's own recording will cover it in time
 
 See `~/Downloads/trading-tool-project-brief.md` for full context and figures.
