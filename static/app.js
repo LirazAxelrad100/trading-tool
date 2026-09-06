@@ -702,7 +702,7 @@ function renderOppBScore(s) {
   return `
     <div class="oppb-score">
       <strong>Opportunities B score: ${Math.round(s.composite * 100)}</strong>
-      <span class="subtitle">conviction ${s.conviction.toFixed(2)} · beats ${beats} · drift ${driftSym} — the same conviction+beats+drift lens as the B list, computed live for this ticker (not a verdict).</span>
+      <span class="subtitle">conviction ${s.conviction.toFixed(2)} · beats ${beats} · drift ${driftSym}</span>
     </div>`;
 }
 
@@ -828,33 +828,30 @@ function renderFundamentals(f) {
         ? "So investors pay about what they did a year ago for the same profit."
         : `So investors now pay ${pct(Math.abs(mc))} ${mc > 0 ? "more" : "less"} for the same profit than a year ago.`
     );
-    // Two different situations need different readings, and only the falling one is about a
-    // recovery. A stock that has risen needs the opposite point: how much of the gain came
-    // from the business earning more, and how much from the market simply paying more.
+    // One closing reading, one sentence. Each situation gets its own — the falling one is
+    // about a recovery, a risen one needs the opposite point (how much of the gain came from
+    // the business earning more rather than the market paying more). Deliberately does not
+    // restate "cheaper relative to earnings": the sentence above already said exactly that.
     if (dd != null && dd <= -25) {
       sentences.push(
         flat
-          ? `The share price is ${pct(
-              Math.abs(dd)
-            )} below its 12-month high. Over the year, though, price and profits grew by similar amounts — so the price is back in line with profits, and it was the earlier high that was out of step.`
+          ? `It sits ${pct(Math.abs(dd))} below its 12-month high — so the earlier high was the step out of line, not this level.`
           : mc < 0
           ? f.eps_growth_pct >= 0
-            ? `The share price is ${pct(
-                Math.abs(dd)
-              )} below its 12-month high while profits grew, so the shares are cheaper relative to what the company earns than they were a year ago.`
-            : `The share price is ${pct(
-                Math.abs(dd)
-              )} below its 12-month high, and profits fell too — the price dropped further than profits did, so the shares are cheaper relative to earnings, but off a shrinking business.`
-          : `The share price is ${pct(
-              Math.abs(dd)
-            )} below its 12-month high, yet still costs more relative to what the company earns than it did a year ago.`
+            ? `It sits ${pct(Math.abs(dd))} below its 12-month high while profits grew.`
+            : `It sits ${pct(Math.abs(dd))} below its 12-month high, but profits fell too — cheaper, off a shrinking business.`
+          : `It sits ${pct(Math.abs(dd))} below its 12-month high and still costs more per unit of profit than a year ago.`
       );
     } else if (!flat && mc > 0) {
+      // Only split the gain when profits actually grew — saying "part of that gain is the
+      // business earning more" while profit fell is simply false, and this branch fires on
+      // the multiple alone. Both wordings name the second half as *opinion* rather than "the
+      // market paying more", which the user read as a phrase without a meaning attached.
       sentences.push(
-        "Part of the gain is the business earning more and part is the market deciding to pay more for it — and the second half can reverse without the company doing anything wrong."
+        f.eps_growth_pct > 0
+          ? "Part of that rise is the company earning more, and part is people paying more for the same profit. That second part is opinion, and opinion can go back down without anything changing at the company."
+          : "Profits fell, so this rise isn't the company earning more — it's people paying more for the same profit. That's opinion, and opinion can go back down without anything changing at the company."
       );
-    } else if (!flat && mc < 0) {
-      sentences.push("Profit grew faster than the share price, so the shares are cheaper relative to earnings than a year ago.");
     }
   }
 
@@ -862,11 +859,7 @@ function renderFundamentals(f) {
   // sitting in the middle it read as though the valuation change followed from the quarter.
   // It has no profit counterpart because Finnhub's growth figures are trailing-twelve-month.
   if (f.price_3m_pct != null) {
-    sentences.push(
-      `Over the past 3 months alone the share price moved ${pct(
-        f.price_3m_pct
-      )}, though profit is only comparable over a full year, so there is no matching figure for that stretch.`
-    );
+    sentences.push(`Over the past 3 months alone the price moved ${pct(f.price_3m_pct)} (profit only compares over a full year).`);
   }
 
   return `
@@ -892,19 +885,19 @@ function renderEarningsRisk(er) {
 
 function renderSignals(result) {
   const sig = result.signals || {};
-  // Ordered by how much each changes the reading, not by the order they were built in.
-  // Price vs. profits and the contradictions carry the actual argument; the scores, sector
-  // standing, volatility and today's move are reference. Previously everything was weighted
-  // equally, which buried the one paragraph explaining STRL beneath three lesser ones.
+  // Hard data first (the table: Zacks rank through next earnings), then the interpreting
+  // boxes, then the tensions between them, then the LLM summary last. The reasoning is that
+  // the numbers are what the boxes are talking about, so they should already be on screen —
+  // and a tension only means something once you've read the readings it's between.
   return (
+    renderSignalsTable(sig.metrics) +
     renderFundamentals(result.fundamentals) +
-    renderContradictions(sig.contradictions) +
-    renderEarningsRisk(sig.earnings_risk) +
     renderSectorContext(result.sector_context, (result.fundamentals || {}).price_3m_pct) +
     renderOppBScore(result.opp_b_score) +
     renderRisk(result.volatility) +
     renderMomentum(result.momentum) +
-    renderSignalsTable(sig.metrics)
+    renderContradictions(sig.contradictions) +
+    renderEarningsRisk(sig.earnings_risk)
   );
 }
 
