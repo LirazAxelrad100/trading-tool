@@ -1481,6 +1481,7 @@ function renderWatchlist() {
 
   renderWatchTagFilters();
   renderThemeStages();
+  renderProfitVsPrice();
 
   for (const field of ["ticker", "score", "move_1d", "move_1w", "move_3m"]) {
     const el = document.getElementById(`watch-arrow-${field}`);
@@ -1610,6 +1611,67 @@ function renderThemeStages() {
   host.innerHTML = rows.length
     ? `<ul class="checklist-context">${rows.join("")}</ul>`
     : `<p class="subtitle">Tag two or more tickers with the same #tag to see how that group is doing as a whole.</p>`;
+}
+
+// Profit against price, as its own table under the watch list rather than two more columns.
+// The user's call, and the right one: the table had no profit figure at all, so this was not
+// one column being added but a second kind of number arriving beside nine price ones.
+//
+// Both figures come free from the metrics call fetch_watch_data already makes. Deliberately
+// two facts and no verdict — no score, no tick, no ranking of the two groups against each
+// other — because "profits grew and people pay less" is a starting point for a question, not
+// an answer. The split into two groups is the whole point: it is the one comparison that
+// separates a fall worth looking at from a fall that only looks cheap.
+function renderProfitVsPrice() {
+  const host = document.getElementById("watch-profit-price");
+  if (!host) return;
+
+  const priced = watchlist.filter((w) => w.profit_1y_pct != null);
+  if (!priced.length) {
+    host.innerHTML = `<p class="subtitle">Refresh the watch list to see how each company's profits compare with its price.</p>`;
+    return;
+  }
+
+  // Sorted by what people pay, so the two groups fall either side of zero on their own.
+  // Rows with no comparable figure (profit off a near-zero base) sit at the end rather than
+  // being dropped — the profit number is still real and worth seeing.
+  const rows = [...priced].sort((a, b) => {
+    const av = a.pay_per_profit_pct, bv = b.pay_per_profit_pct;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return av - bv;
+  });
+
+  // Plain text, no colour. Green here would mean "cheaper is good", and that is the one
+  // thing this table must not say — the market often pays less for a very good reason, which
+  // is the whole cyclical-peak trap. Profit gets the usual up/down colour because more
+  // profit is a fact about the company, not a view about the price.
+  const cell = (w) => {
+    if (w.pay_per_profit_pct != null) return oppFmtPctRaw(w.pay_per_profit_pct);
+    return `<span class="subtitle" title="Profit grew from a very low base, so this figure is not meaningful — it is worked out by dividing by that growth.">—</span>`;
+  };
+
+  const body = rows
+    .map(
+      (w) => `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${cell(w)}</td></tr>`
+    )
+    .join("");
+
+  const missing = watchlist.filter((w) => w.profit_1y_pct == null).map((w) => w.ticker);
+
+  host.innerHTML = `
+    <h3>Profits vs. price</h3>
+    <p class="subtitle">Two facts per company, over the past year. <strong>Profit</strong> is how much more, or less, it earned per share. That is measured. <strong>Pay per €1</strong> is how much more, or less, people now pay for each €1 of that yearly profit. A minus means people pay less than they did a year ago — which can mean the price has fallen behind the company, or that the market expects the profits to drop. Neither column says what happens next.</p>
+    <table class="consensus-table">
+      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th></tr>
+      ${body}
+    </table>
+    ${
+      missing.length
+        ? `<p class="subtitle">No profit figures available for ${escapeHtml(missing.join(", "))}.</p>`
+        : ""
+    }`;
 }
 
 function renderWatchTagFilters() {

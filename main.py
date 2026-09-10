@@ -16,6 +16,7 @@ import alpha_vantage
 import breadth
 import concentration
 import consensus_store
+import fundamentals
 import ls_tc
 import momentum
 import opportunities_b
@@ -592,6 +593,19 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
         data["off_high"] = momentum.pct_from_52w_high(
             shape["close"], metrics.get("52WeekHigh"), metrics.get("52WeekLow")
         )
+        # Profit growth and the change in what people pay per unit of profit, for the
+        # panel under the table. Free: fundamentals.analyze() derives both from this same
+        # metrics dict, and the earnings history it also accepts is only needed for the
+        # beats count, which the Opp B score already covers. Same trick as the momentum
+        # column — a second reading of a call we were making anyway.
+        f = fundamentals.analyze(metrics)
+        if not f.get("error"):
+            data["profit_1y_pct"] = f.get("eps_growth_pct")
+            data["profit_low_base"] = bool(f.get("eps_base_distorted"))
+            # Withheld when profit rebounded off a near-zero base: this figure is derived
+            # by dividing by that growth, so a +744% year makes the arithmetic produce a
+            # large negative number that is not a real statement about the price.
+            data["pay_per_profit_pct"] = None if f.get("eps_base_distorted") else f.get("multiple_change_pct")
     except PriceError:
         pass
     try:
