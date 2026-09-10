@@ -1,3 +1,4 @@
+import csv
 import json
 import re
 from pathlib import Path
@@ -6,7 +7,7 @@ import zacks_import
 
 DOWNLOADS_DIR = Path.home() / "Downloads"
 STATE_FILE = Path(__file__).parent / "data" / "zacks_watch_state.json"
-FILENAME_PATTERN = re.compile(r"(zacks|rank)", re.IGNORECASE)
+FILENAME_PATTERN = re.compile(r"(zacks|rank|growth)", re.IGNORECASE)
 
 
 def load_state() -> dict:
@@ -31,8 +32,17 @@ def run() -> None:
             continue
 
         try:
-            result = zacks_import.import_csv(path)
-            print(f"Imported {path.name}: {result['imported_count']} tickers")
+            # Route on the file's own columns rather than its name. The Growth export
+            # arrives named after whatever the Zacks portfolio is called (e.g.
+            # "liraz_-_growth-2026-09-10.csv"), so a filename rule would skip it silently.
+            with open(path, newline="", encoding="utf-8-sig") as f:
+                header = csv.DictReader(f).fieldnames
+            if zacks_import.is_growth_export(header):
+                result = zacks_import.import_growth_csv(path)
+                print(f"Imported growth estimates from {path.name}: {result['imported_count']} tickers")
+            else:
+                result = zacks_import.import_csv(path)
+                print(f"Imported {path.name}: {result['imported_count']} tickers")
         except ValueError as e:
             print(f"Skipped {path.name}: {e}")
         except Exception as e:
