@@ -85,6 +85,29 @@ def fetch_quote(ticker: str, usd_to_eur_rate: float) -> dict:
     }
 
 
+# Finnhub keeps returning a ticker's last recommendation snapshot forever, with no hint
+# that coverage stopped. Real case (FET, found 2026-09-10): its "current" consensus was
+# 3.75 — 0 buy, 4 sell — dated 2022-08-01, four years stale, and a forced refetch returned
+# the same rows. Displayed as-is it reads as today's analyst view of a stock that has since
+# risen 209%, and it silently feeds Opportunities B's conviction term. Finnhub publishes
+# monthly, so anything older than half a year means coverage has lapsed, not that opinion
+# is merely unchanged.
+CONSENSUS_MAX_AGE_DAYS = 180
+
+
+def consensus_is_stale(period: Optional[str]) -> bool:
+    """True when a recommendation snapshot is too old to describe the company now.
+    An unparseable or missing period counts as stale — a number we cannot date is a
+    number we cannot vouch for."""
+    if not period:
+        return True
+    try:
+        as_of = date.fromisoformat(str(period)[:10])
+    except ValueError:
+        return True
+    return (date.today() - as_of).days > CONSENSUS_MAX_AGE_DAYS
+
+
 def fetch_analyst_consensus(ticker: str) -> dict:
     data = _finnhub_get("stock/recommendation", {"symbol": ticker})
 
