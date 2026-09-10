@@ -624,6 +624,10 @@ def list_watchlist():
     items = load_watchlist()
     for it in items:
         it.update(consensus_store.overlay_consensus(it["ticker"]))
+        # Forward estimates come from a hand-exported Zacks Growth CSV rather than from
+        # the per-ticker refresh, so they are overlaid at read time like the consensus —
+        # a newly imported export shows up immediately, without re-refreshing every row.
+        it.update(zacks_import.overlay_growth(it["ticker"]))
     return items
 
 

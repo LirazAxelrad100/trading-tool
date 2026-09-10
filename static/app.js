@@ -138,6 +138,16 @@ function oppFmtPctRaw(v) {
   return v == null ? "—" : euPctFormat.format(v) + "%";
 }
 
+// EU date from a plain ISO day string. Split rather than new Date(...) on purpose: an
+// ISO date parses as UTC midnight, and every timezone conversion in this file has been a
+// bug at some point (see isoWeekStart, and the since-added figure). No timezone is
+// involved in "which day is this", so none should be introduced.
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = String(iso).slice(0, 10).split("-");
+  return y && m && d ? `${d}.${m}.${y}` : "—";
+}
+
 function coloredPct(v) {
   if (v == null) return "—";
   const cls = v > 0 ? "price-up" : v < 0 ? "price-down" : "";
@@ -1652,9 +1662,23 @@ function renderProfitVsPrice() {
     return `<span class="subtitle" title="Profit grew from a very low base, so this figure is not meaningful — it is worked out by dividing by that growth.">—</span>`;
   };
 
+  // The forward column is the only one here that is not history. It comes from a Zacks
+  // Growth export the user drops in Downloads, so it is blank until that ticker is in one
+  // — said plainly on hover rather than left as a bare dash, since "no estimate exists" and
+  // "you have not exported this one yet" are different things and only the second is fixable.
+  const expected = (w) =>
+    w.growth_next_year_pct != null
+      ? coloredPct(w.growth_next_year_pct)
+      : `<span class="subtitle" title="Not in a Zacks Growth export yet. Add this ticker to your Zacks portfolio, pick the Growth tab, and export.">—</span>`;
+
+  const reports = (w) => (w.next_report_date ? fmtDate(w.next_report_date) : "—");
+
   const body = rows
     .map(
-      (w) => `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${cell(w)}</td></tr>`
+      (w) =>
+        `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${cell(
+          w
+        )}</td><td>${expected(w)}</td><td>${reports(w)}</td></tr>`
     )
     .join("");
 
@@ -1662,9 +1686,9 @@ function renderProfitVsPrice() {
 
   host.innerHTML = `
     <h3>Profits vs. price</h3>
-    <p class="subtitle">Two facts per company, over the past year. <strong>Profit</strong> is how much more, or less, it earned per share. That is measured. <strong>Pay per €1</strong> is how much more, or less, people now pay for each €1 of that yearly profit. A minus means people pay less than they did a year ago — which can mean the price has fallen behind the company, or that the market expects the profits to drop. Neither column says what happens next.</p>
+    <p class="subtitle"><strong>Profit</strong> — how much more, or less, the company earned per share over the past year. Measured. <strong>Pay per €1</strong> — how much more, or less, people now pay for each €1 of that yearly profit. A minus means they pay less than a year ago, which can mean the price has fallen behind the company, or that the market expects profits to drop. <strong>Expected next year</strong> — how much analysts think profit will grow, from your Zacks Growth export. That one is a forecast, not a fact, and forecasts for companies whose profits swing with commodity prices are the least reliable of all.</p>
     <table class="consensus-table">
-      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th></tr>
+      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th><th>Expected next year</th><th>Reports</th></tr>
       ${body}
     </table>
     ${
