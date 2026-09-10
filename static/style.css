@@ -296,3 +296,11 @@ td.nowrap { white-space: nowrap; }
 }
 .checklist-context { margin: 0.2rem 0 0; padding-left: 1.1rem; line-height: 1.55; }
 .checklist-context li { margin-bottom: 0.3rem; }
+
+/* The archive's Why holds a paragraph, not a cell's worth of text. Capped and wrapped
+   so one long note cannot stretch the table past the window. */
+.archive-why {
+  max-width: 34rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

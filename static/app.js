@@ -1216,7 +1216,9 @@ async function addHolding() {
           }),
         });
       }
-      await fetch(`/api/watchlist/${pendingPromotion.watchId}`, { method: "DELETE" });
+      // Archived as "bought", not just deleted — this is the outcome most worth a record,
+      // since it is the one case where the watch-list note and the real position line up.
+      await fetch(`/api/watchlist/${pendingPromotion.watchId}?outcome=bought`, { method: "DELETE" });
       await loadWatchlist();
     }
     setPendingPromotion(null);
@@ -1448,6 +1450,7 @@ async function loadWatchlist() {
   const res = await fetch("/api/watchlist");
   watchlist = await res.json();
   renderWatchlist();
+  loadWatchArchive();
 }
 
 function watchSortBy(field) {
@@ -1786,10 +1789,86 @@ async function addWatchItem() {
   }
 }
 
+// Asks which of the three removals this is, because they are not the same thing and the
+// archive is worth little if they blur together. Kept to one prompt rather than a modal:
+// two of the three answers are one keypress, and a dialog for a delete already existed.
 async function removeWatchItem(id) {
-  if (!confirm("Remove this ticker from your watch list?")) return;
-  await fetch(`/api/watchlist/${id}`, { method: "DELETE" });
+  const w = watchlist.find((x) => x.id === id);
+  const answer = (
+    prompt(
+      `Remove ${w ? w.ticker : "this ticker"} from your watch list?\n\n` +
+        `Type one:\n` +
+        `  r  — rejected: you looked and said no (keeps your note)\n` +
+        `  m  — mistake: added by accident, keep nothing\n\n` +
+        `Leave blank to cancel.`,
+      "r"
+    ) || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!answer) return;
+  const outcome = answer.startsWith("m") ? "mistake" : answer.startsWith("r") ? "rejected" : null;
+  if (!outcome) return;
+  await fetch(`/api/watchlist/${id}?outcome=${outcome}`, { method: "DELETE" });
   await loadWatchlist();
+}
+
+// Everything the archive keeps is either fixed in time or a frozen pair of prices. There
+// is deliberately no score, return or consensus here: those read as current when they are
+// a year old, which is the fault that made FET's 2022 consensus dangerous.
+const ARCHIVE_OUTCOMES = {
+  rejected: { label: "Rejected", cls: "" },
+  bought: { label: "Bought", cls: "price-up" },
+  mistake: { label: "Mistake", cls: "subtitle" },
+};
+
+async function loadWatchArchive() {
+  const host = document.getElementById("watch-archive");
+  if (!host) return;
+  const res = await fetch("/api/watchlist/archive");
+  const entries = (await res.json()) || [];
+  if (!entries.length) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const since = (e) => {
+    if (e.price_at_add == null || e.price_at_remove == null) return "—";
+    return coloredPct(((e.price_at_remove / e.price_at_add) - 1) * 100);
+  };
+
+  const rows = [...entries]
+    .sort((a, b) => String(b.removed_date).localeCompare(String(a.removed_date)))
+    .map((e) => {
+      const o = ARCHIVE_OUTCOMES[e.outcome] || ARCHIVE_OUTCOMES.rejected;
+      const link = e.source_url
+        ? ` <a href="${escapeHtml(e.source_url)}" target="_blank" rel="noopener" title="Open the source">↗</a>`
+        : "";
+      return `<tr>
+        <td>${escapeHtml(e.ticker)}</td>
+        <td><span class="${o.cls}">${o.label}</span></td>
+        <td>${fmtDate(e.added_date)}</td>
+        <td>${fmtDate(e.removed_date)}</td>
+        <td>${since(e)}</td>
+        <td class="archive-why">${escapeHtml(e.why || "—")}${link}</td>
+        <td><button class="danger" onclick="deleteArchiveEntry('${e.id}')">Delete</button></td>
+      </tr>`;
+    })
+    .join("");
+
+  host.innerHTML = `
+    <h3>Removed from the watch list</h3>
+    <p class="subtitle">What you decided, and what happened to the price between adding and removing it. Kept so a "no" is still worth something later — the row stops being useful long before the thinking does.</p>
+    <table class="consensus-table">
+      <tr><th>Ticker</th><th>Outcome</th><th>Added</th><th>Removed</th><th>Price change while watched</th><th>Why</th><th></th></tr>
+      ${rows}
+    </table>`;
+}
+
+async function deleteArchiveEntry(id) {
+  if (!confirm("Delete this archive entry for good? The note goes with it.")) return;
+  await fetch(`/api/watchlist/archive/${id}`, { method: "DELETE" });
+  await loadWatchArchive();
 }
 
 async function refreshWatchItem(id) {
