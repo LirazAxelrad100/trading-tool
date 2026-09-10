@@ -54,8 +54,19 @@ def refresh(ticker: str) -> dict:
 def overlay_consensus(ticker: str, avg_key: str = "consensus_avg", full_key: str = "consensus") -> dict:
     """The two fields every consensus display already reads, sourced from the shared
     cache when available so a screen never shows its own stale, independently-fetched
-    copy alongside another screen's fresher one."""
+    copy alongside another screen's fresher one.
+
+    A snapshot older than prices.CONSENSUS_MAX_AGE_DAYS is withheld from the average
+    rather than shown: the UI reads `consensus_avg` straight into a number, and a rating
+    from 2022 rendered next to a live price is worse than no rating at all. The counts
+    still travel under `full_key` (with `consensus_stale`) so a screen can say *why* it
+    is blank instead of implying the ticker was never covered."""
     entry = get(ticker)
     if entry is None:
         return {}
-    return {full_key: entry, avg_key: entry["average"]}
+    stale = prices.consensus_is_stale(entry.get("period"))
+    return {
+        full_key: {**entry, "stale": stale},
+        avg_key: None if stale else entry["average"],
+        "consensus_stale": stale,
+    }

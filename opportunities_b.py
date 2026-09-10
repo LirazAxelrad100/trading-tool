@@ -14,6 +14,7 @@ call — see docs. Purely descriptive/sorted, never a "buy this" pick (CLAUDE.md
 """
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +78,14 @@ def _consensus_metrics(history: list):
     n = sum(latest[k] for k in CONSENSUS_WEIGHTS)
     if n == 0:
         return None
+    # Coverage that lapsed years ago is not a weak opinion, it is no opinion — and
+    # conviction is 45% of the composite, so a dead snapshot scores the ticker anyway.
+    # FET (2026-09-10) carried a 2022-08-01 snapshot and scored 0.500 off it, which read
+    # as "analysts are lukewarm" when the truth is "nobody has rated this in four years".
+    # Returning None here routes it to the same "no usable analyst coverage" path as a
+    # ticker Finnhub has never covered.
+    if prices.consensus_is_stale(latest.get("period")):
+        return None
     avg = sum(latest[k] * w for k, w in CONSENSUS_WEIGHTS.items()) / n
     # conviction: strong-buys count double, normalised to 0-1 (all SB -> 1, all Buy -> 0.5)
     conviction = (2 * latest["strongBuy"] + latest["buy"]) / (2 * n)
@@ -100,6 +109,36 @@ def _consensus_metrics(history: list):
         "counts": {k: latest[k] for k in CONSENSUS_WEIGHTS},
         "period": latest.get("period"),
     }
+
+
+SHARE_CLASS_SUFFIX = re.compile(r"\s*\((?:Class|Series)\s+[A-Z]\)\s*$", re.IGNORECASE)
+
+
+def _dedupe_share_classes(stage1: list, universe: dict) -> list:
+    """One company, one slot. The S&P 500 lists both classes of a dual-class company as
+    separate constituents, and since they share the same analysts and the same earnings
+    they score identically — so both survive to the shortlist and both land in the final
+    twenty. Real case (2026-09-10): News Corp took two of twenty places as NWS and NWSA,
+    identical down to the composite, crowding out a distinct company.
+
+    The universe file already carries the class in the company name ("News Corp (Class B)"),
+    so stripping that suffix identifies the pair without spending an API call on a profile
+    lookup. Keeps whichever class has more analysts covering it, ticker alphabetically as
+    the tiebreak, so a rebuild picks the same one rather than shuffling the list.
+
+    Deliberately applied before stage 2 rather than to the final list: the duplicate would
+    otherwise cost an earnings call and a rate-limit sleep to compute a score already known."""
+    groups = {}
+    for pair in stage1:
+        company = universe.get(pair[0], {}).get("company") or pair[0]
+        key = SHARE_CLASS_SUFFIX.sub("", company).strip().casefold()
+        groups.setdefault(key, []).append(pair)
+
+    # Most analysts wins; alphabetically-first ticker breaks the tie. Written as a sort key
+    # rather than a running comparison because the obvious shortcut is wrong: NWS sorts
+    # *below* NWSA under any reversed-string trick, since one is a prefix of the other.
+    kept = {min(g, key=lambda pair: (-pair[1]["n"], pair[0]))[0] for g in groups.values()}
+    return [pair for pair in stage1 if pair[0] in kept]
 
 
 def _beats(ticker: str):
@@ -163,6 +202,7 @@ def build(universe_limit: int = None) -> dict:
             time.sleep(RATE_SLEEP)
 
     stage1.sort(key=lambda x: x[1]["conviction"], reverse=True)
+    stage1 = _dedupe_share_classes(stage1, universe)
     shortlist = stage1[:SHORTLIST_SIZE]
 
     # Stage 2 — enrich the shortlist with earnings-beat consistency + composite

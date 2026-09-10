@@ -81,12 +81,24 @@ let lastHoldings = [];
 let zacksRanks = {};
 let weeklyTableWeeksShown = 10;
 
+// A blank consensus has two very different causes, and the dash alone conflates them:
+// nobody ever covered this ticker, or the analysts who did stopped years ago. The second
+// case is the dangerous one — FET's "3,75" was dated 2022 and read as a current verdict on
+// a stock that had since risen 209% — so the backend withholds the number and the cell
+// says so on hover rather than looking like an ordinary uncovered name.
+function staleConsensusTitle(h) {
+  const period = (h.consensus || {}).period;
+  return h.consensus_stale
+    ? ` title="Analyst coverage stopped ${period || "years ago"} — too old to show as current."`
+    : "";
+}
+
 function zacksCell(h) {
   const entry = zacksRanks[h.ticker];
   const rankPart =
     entry == null ? "—" : entry.rank === 1 ? `<span class="zacks-rank-1">1</span>` : String(entry.rank);
-  const avgPart = h.consensus_avg != null ? h.consensus_avg.toFixed(2) : "—";
-  return `${rankPart} / ${avgPart}`;
+  const avgPart = h.consensus_avg != null ? h.consensus_avg.toFixed(2) : h.consensus_stale ? "stale" : "—";
+  return `${rankPart} / <span${staleConsensusTitle(h)}>${avgPart}</span>`;
 }
 
 async function loadZacksStatus() {

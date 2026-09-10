@@ -69,7 +69,11 @@ def pct_from_52w_high(close, high_52w, low_52w) -> Optional[float]:
         return None
     if low_52w and close < low_52w * 0.85:
         return None
-    return (close / high_52w - 1) * 100
+    # Never report a *positive* distance from the high. Inside the tolerance band above a
+    # stale high the raw figure goes positive, which renders as "4.5% above its 12-month
+    # high" — read as a bug, because it is one (NWS, 2026-09-10: +4.5%, while NWSA, the
+    # same company, gave -6.5%). A stock at or through its high is at its high: 0%.
+    return min(0.0, (close / high_52w - 1) * 100)
 
 
 def _trend(ret_3m: Optional[float], pct_from_high: Optional[float]) -> Optional[str]:
