@@ -712,7 +712,7 @@ def add_watchlist_item(item: WatchlistIn):
 
 
 @app.delete("/api/watchlist/{item_id}")
-def delete_watchlist_item(item_id: str, outcome: str = "rejected"):
+def delete_watchlist_item(item_id: str, outcome: str):
     """Removing a ticker archives it rather than erasing it.
 
     The row stops being useful long before the thinking does. NWS is the case that
@@ -722,7 +722,14 @@ def delete_watchlist_item(item_id: str, outcome: str = "rejected"):
 
     `outcome` separates the three things a removal can mean — rejected after looking,
     bought, or added by mistake — because in a year the first two are indistinguishable
-    from the archive alone, and they are opposites."""
+    from the archive alone, and they are opposites.
+
+    It is **required, with no default**. It briefly defaulted to "rejected", and on the
+    very first real use that recorded TSM as rejected on the day it was bought: a stale
+    tab was still running the JS from before the Bought button passed the parameter, so
+    the call arrived without it and the default answered confidently and wrongly. A
+    missing outcome is a caller bug, and the archive exists to be trusted a year later —
+    better a 422 now than a false record then."""
     items = load_watchlist()
     item = next((it for it in items if it["id"] == item_id), None)
     if item is None:
