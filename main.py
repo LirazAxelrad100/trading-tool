@@ -33,6 +33,7 @@ PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.jso
 HOLDINGS_HISTORY_FILE = Path(__file__).parent / "data" / "holdings_history.json"
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 WATCHLIST_HISTORY_FILE = Path(__file__).parent / "data" / "watchlist_history.json"
+WATCH_ARCHIVE_FILE = Path(__file__).parent / "data" / "watchlist_archive.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -557,6 +558,51 @@ def save_watchlist(items: list[dict]) -> None:
     WATCHLIST_FILE.write_text(json.dumps(items, indent=2))
 
 
+WATCH_ARCHIVE_OUTCOMES = ("rejected", "bought", "mistake")
+
+
+def load_watch_archive() -> list[dict]:
+    if not WATCH_ARCHIVE_FILE.exists():
+        return []
+    return json.loads(WATCH_ARCHIVE_FILE.read_text())
+
+
+def save_watch_archive(entries: list[dict]) -> None:
+    WATCH_ARCHIVE_FILE.write_text(json.dumps(entries, indent=2))
+
+
+def archive_watch_item(item: dict, outcome: str) -> dict:
+    """Keep what you worked out, drop what goes stale.
+
+    Deliberately not the whole row. The trailing returns, the Opportunities B score and
+    the consensus are all "as of the last refresh" and will read as current a year from
+    now when they are not — the same fault as FET's four-year-old consensus. What is kept
+    is either fixed in time (when it was added, what you wrote, the link) or a pair of
+    numbers that only mean anything *because* they are frozen: the price when it went on
+    the list and the price when it came off. Those two are what let the archive answer
+    "was I right to pass on this", which is the only reason to keep a rejected ticker."""
+    if outcome not in WATCH_ARCHIVE_OUTCOMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Outcome must be one of {', '.join(WATCH_ARCHIVE_OUTCOMES)}.",
+        )
+    entry = {
+        "id": str(uuid.uuid4()),
+        "ticker": item["ticker"],
+        "added_date": item.get("added_date"),
+        "removed_date": date.today().isoformat(),
+        "outcome": outcome,
+        "why": item.get("why") or "",
+        "source_url": item.get("source_url") or "",
+        "price_at_add": item.get("price_at_add"),
+        "price_at_remove": item.get("current_price"),
+    }
+    entries = load_watch_archive()
+    entries.append(entry)
+    save_watch_archive(entries)
+    return entry
+
+
 def find_watch_item(items: list[dict], item_id: str) -> dict:
     for it in items:
         if it["id"] == item_id:
@@ -666,10 +712,49 @@ def add_watchlist_item(item: WatchlistIn):
 
 
 @app.delete("/api/watchlist/{item_id}")
-def delete_watchlist_item(item_id: str):
+def delete_watchlist_item(item_id: str, outcome: str = "rejected"):
+    """Removing a ticker archives it rather than erasing it.
+
+    The row stops being useful long before the thinking does. NWS is the case that
+    prompted this: the ticker is not worth watching (profits halved while the price
+    held), but "Opportunities B scored it 0,785 while profits fell 50%" is a lesson
+    about the score, and a plain delete would have taken it with the row.
+
+    `outcome` separates the three things a removal can mean — rejected after looking,
+    bought, or added by mistake — because in a year the first two are indistinguishable
+    from the archive alone, and they are opposites."""
     items = load_watchlist()
-    items = [it for it in items if it["id"] != item_id]
-    save_watchlist(items)
+    item = next((it for it in items if it["id"] == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    if outcome not in WATCH_ARCHIVE_OUTCOMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Outcome must be one of {', '.join(WATCH_ARCHIVE_OUTCOMES)}.",
+        )
+    # "Mistake" means the ticker was added by accident, so there is no decision to keep
+    # and archiving it would only make the real records harder to read. It deletes.
+    if outcome != "mistake":
+        archive_watch_item(item, outcome)
+    save_watchlist([it for it in items if it["id"] != item_id])
+    return {"ok": True}
+
+
+@app.get("/api/watchlist/archive")
+def get_watchlist_archive():
+    return load_watch_archive()
+
+
+@app.delete("/api/watchlist/archive/{entry_id}")
+def delete_watch_archive_entry(entry_id: str):
+    """A real delete, for a mistake filed by mistake. The archive is meant to be kept,
+    so this is the only way out of it and it is deliberately separate from removing a
+    ticker from the list."""
+    entries = load_watch_archive()
+    remaining = [e for e in entries if e["id"] != entry_id]
+    if len(remaining) == len(entries):
+        raise HTTPException(status_code=404, detail="Archive entry not found")
+    save_watch_archive(remaining)
     return {"ok": True}
 
 
