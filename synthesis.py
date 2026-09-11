@@ -139,6 +139,12 @@ def derive_signals(data: dict, momentum_data: Optional[dict] = None) -> dict:
         "consensus": cons,
         "recent_surprises": surprises,
         "next_earnings": next_earnings,
+        # Forward estimates from the user's own Zacks Growth export — the only free
+        # source of them here. Shown as a pair because either number alone misleads:
+        # VLO reads "-24% next year" on its own, which sounds like a company in trouble,
+        # when the truth is +288% this year then -24% — a fall from a spike. Empty for
+        # any ticker not yet in an export, which the table renders as a dash.
+        **zacks_import.overlay_growth(data.get("ticker") or ""),
     }
 
     contradictions = []
