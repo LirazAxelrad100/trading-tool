@@ -645,6 +645,12 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
         # metrics dict, and the earnings history it also accepts is only needed for the
         # beats count, which the Opp B score already covers. Same trick as the momentum
         # column — a second reading of a call we were making anyway.
+        # The most recent quarter, from the same metrics dict. It is the link between the
+        # other two profit figures: the 12-month one is a rear-view average that still
+        # carries the weak quarters, so a company that has already turned reads as falling.
+        # ONTO (2026-09-11) was -33,9% over four quarters and +74,9% in the latest one, which
+        # is why its "expected +63% this year" looked like a contradiction and was not.
+        data["profit_latest_quarter_pct"] = metrics.get("epsGrowthQuarterlyYoy")
         f = fundamentals.analyze(metrics)
         if not f.get("error"):
             data["profit_1y_pct"] = f.get("eps_growth_pct")

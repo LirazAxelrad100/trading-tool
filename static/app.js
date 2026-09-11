@@ -1729,9 +1729,12 @@ function renderProfitVsPrice() {
   const body = rows
     .map(
       (w) =>
-        `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${cell(
-          w
-        )}</td><td>${expected(w, "growth_this_year_pct")}</td><td>${expected(w, "growth_next_year_pct")}</td><td>${reports(w)}</td></tr>`
+        `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${coloredPct(
+          w.profit_latest_quarter_pct
+        )}</td><td>${cell(w)}</td><td>${expected(w, "growth_this_year_pct")}</td><td>${expected(
+          w,
+          "growth_next_year_pct"
+        )}</td><td>${reports(w)}</td></tr>`
     )
     .join("");
 
@@ -1739,9 +1742,10 @@ function renderProfitVsPrice() {
 
   host.innerHTML = `
     <h3>Profits vs. price</h3>
-    <p class="subtitle"><strong>Profit</strong> — how much more, or less, the company earned per share over the past year. Measured. <strong>Pay per €1</strong> — how much more, or less, people now pay for each €1 of that yearly profit. A minus means they pay less than a year ago, which can mean the price has fallen behind the company, or that the market expects profits to drop. <strong>Expected next year</strong> — how much analysts think profit will grow, from your Zacks Growth export. That one is a forecast, not a fact, and forecasts for companies whose profits swing with commodity prices are the least reliable of all.</p>
+    <p class="subtitle"><strong>Profit, last 4 quarters</strong> — how much more, or less, the company earned per share than in the four quarters before. It is an average, so a company that has just turned still reads as falling. <strong>Profit, latest quarter</strong> — the same comparison for the most recent quarter only. That is the one that shows a turn first. <strong>Pay per €1 of profit</strong> — how much more, or less, people now pay for each €1 of yearly profit. A minus means they pay less than a year ago, which can mean the price has fallen behind the company, or that the market expects profits to drop. <strong>Expected profit</strong> — how much analysts think profit will grow. A forecast, not a fact, and least reliable for companies whose profits swing with commodity prices.</p>
+    <p class="subtitle">The two profit columns and the two expectation columns come from <strong>different sources that count profit differently</strong> — the official accounting figure on the left, the analysts' adjusted figure on the right. So read each side's direction, but do not compare their sizes across the middle.</p>
     <table class="consensus-table">
-      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th><th>Expected this year</th><th>Expected next year</th><th>Reports</th></tr>
+      <tr><th>Ticker</th><th>Profit,<br />last 4 quarters</th><th>Profit,<br />latest quarter</th><th>Pay per €1<br />of profit</th><th>Expected profit,<br />this year</th><th>Expected profit,<br />next year</th><th>Reports</th></tr>
       ${body}
     </table>
     ${
