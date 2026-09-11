@@ -675,6 +675,19 @@ function renderAnalysisText(s) {
   return escapeHtml(s || "").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }
 
+// Both years, always as a pair, wherever candidates are compared. Either number alone
+// misleads: VLO reads "-24% next year" on its own, which sounds like a company in trouble,
+// when the truth is +288% this year *then* -24% — a fall back from a spike, not a decline.
+// Same reasoning as the two columns in price-vs-profits: the pairing is the meaning.
+function expectedGrowthPair(m) {
+  const t = m.growth_this_year_pct;
+  const n = m.growth_next_year_pct;
+  if (t == null && n == null) return "—";
+  const part = (v, label) =>
+    v == null ? `<span class="subtitle">${label} —</span>` : `${coloredPct(v)} <span class="subtitle">${label}</span>`;
+  return `${part(t, "this year")} · ${part(n, "next year")}`;
+}
+
 function renderSignalsTable(m) {
   if (!m) return "";
   const cons = m.consensus;
@@ -699,6 +712,7 @@ function renderSignalsTable(m) {
       <tr><td>Consensus</td><td>${consLine}</td></tr>
       <tr><td>Recent EPS surprises</td><td>${surprises}</td></tr>
       <tr><td>Next earnings</td><td>${m.next_earnings || "—"}</td></tr>
+      <tr><td>Expected profit growth</td><td>${expectedGrowthPair(m)}</td></tr>
     </table>
   `;
 }
@@ -1266,19 +1280,29 @@ function promoteWatchItem(id) {
   document.getElementById("f-shares").focus();
 }
 
-// The stop line answers "is anything wrong today". This adds "and where is this going",
-// so a glance at the alerts carries both horizons. Deliberately a plain sentence appended
-// to the existing one rather than a second line or a badge — the non-triggered note is the
-// one message that is supposed to stay short and non-actionable, and a whole extra row for
-// a forecast would make a quiet status look like it needs something doing.
+// The stop line answers "is anything wrong today". This adds "where is this going", so one
+// glance at the alerts carries both horizons — and it lives here rather than in the Analyze
+// popup because the alerts are what gets read daily, while opening Analyze costs an LLM call.
+//
+// It gets its **own line**, not an appended clause. A first version glued it onto the stop
+// sentence and the user was right that it read oddly: two unrelated facts sharing one
+// sentence look connected. Same fault as the 3-month move sitting mid-paragraph in
+// renderFundamentals, where adjacency implied a cause.
+//
+// Only next year here — one number keeps a quiet status quiet. The this-year/next-year pair
+// belongs where candidates are compared (Analyze, watch list), not in a daily all-clear.
 //
 // Silent when the ticker is not in a Zacks Growth export, since that is the user's own
 // manual export and a missing line is better than a dash she has to interpret.
-function growthClause(result) {
+function growthLine(result) {
   const g = result.growth_next_year_pct;
-  if (g == null) return "";
-  const dir = g >= 0 ? "grow" : "fall";
-  return ` Analysts expect profit to ${dir} ${fmtPct(Math.abs(g) / 100)} next year.`;
+  if (g == null) return null;
+  const line = document.createElement("div");
+  line.className = "subtitle";
+  line.textContent = `Analysts expect profit to ${g >= 0 ? "grow" : "fall"} ${fmtPct(
+    Math.abs(g) / 100
+  )} next year.`;
+  return line;
 }
 
 function renderFlag(id, result) {
@@ -1341,9 +1365,13 @@ function renderFlag(id, result) {
     note.className = "panel no-trigger";
     const dayWord = result.day_change_pct >= 0 ? "up" : "down";
     const dayClause = result.day_change_pct == null ? "" : `is ${dayWord} by ${fmtPct(Math.abs(result.day_change_pct))} today, and `;
-    note.textContent =
-      `${result.ticker} ${dayClause}is ${fmtPct(result.pct_above_stop)} above stop loss, no change is needed.` +
-      growthClause(result);
+    const stopLine = document.createElement("div");
+    stopLine.textContent = `${result.ticker} ${dayClause}is ${fmtPct(
+      result.pct_above_stop
+    )} above stop loss, no change is needed.`;
+    note.appendChild(stopLine);
+    const growth = growthLine(result);
+    if (growth) note.appendChild(growth);
     flagsDiv.prepend(note);
     return;
   }
@@ -1687,9 +1715,13 @@ function renderProfitVsPrice() {
   // Growth export the user drops in Downloads, so it is blank until that ticker is in one
   // — said plainly on hover rather than left as a bare dash, since "no estimate exists" and
   // "you have not exported this one yet" are different things and only the second is fixable.
-  const expected = (w) =>
-    w.growth_next_year_pct != null
-      ? coloredPct(w.growth_next_year_pct)
+  // Both years, because either alone misleads — VLO is +288% this year then -24% next, and
+  // the second number on its own reads as a company in trouble rather than one coming off a
+  // spike. A blank is a ticker missing from the export, not a missing forecast, so the title
+  // says which: only the first is something she can fix.
+  const expected = (w, field) =>
+    w[field] != null
+      ? coloredPct(w[field])
       : `<span class="subtitle" title="Not in a Zacks Growth export yet. Add this ticker to your Zacks portfolio, pick the Growth tab, and export.">—</span>`;
 
   const reports = (w) => (w.next_report_date ? fmtDate(w.next_report_date) : "—");
@@ -1699,7 +1731,7 @@ function renderProfitVsPrice() {
       (w) =>
         `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${cell(
           w
-        )}</td><td>${expected(w)}</td><td>${reports(w)}</td></tr>`
+        )}</td><td>${expected(w, "growth_this_year_pct")}</td><td>${expected(w, "growth_next_year_pct")}</td><td>${reports(w)}</td></tr>`
     )
     .join("");
 
@@ -1709,7 +1741,7 @@ function renderProfitVsPrice() {
     <h3>Profits vs. price</h3>
     <p class="subtitle"><strong>Profit</strong> — how much more, or less, the company earned per share over the past year. Measured. <strong>Pay per €1</strong> — how much more, or less, people now pay for each €1 of that yearly profit. A minus means they pay less than a year ago, which can mean the price has fallen behind the company, or that the market expects profits to drop. <strong>Expected next year</strong> — how much analysts think profit will grow, from your Zacks Growth export. That one is a forecast, not a fact, and forecasts for companies whose profits swing with commodity prices are the least reliable of all.</p>
     <table class="consensus-table">
-      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th><th>Expected next year</th><th>Reports</th></tr>
+      <tr><th>Ticker</th><th>Profit</th><th>Pay per €1</th><th>Expected this year</th><th>Expected next year</th><th>Reports</th></tr>
       ${body}
     </table>
     ${
