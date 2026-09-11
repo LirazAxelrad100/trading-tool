@@ -1266,6 +1266,21 @@ function promoteWatchItem(id) {
   document.getElementById("f-shares").focus();
 }
 
+// The stop line answers "is anything wrong today". This adds "and where is this going",
+// so a glance at the alerts carries both horizons. Deliberately a plain sentence appended
+// to the existing one rather than a second line or a badge — the non-triggered note is the
+// one message that is supposed to stay short and non-actionable, and a whole extra row for
+// a forecast would make a quiet status look like it needs something doing.
+//
+// Silent when the ticker is not in a Zacks Growth export, since that is the user's own
+// manual export and a missing line is better than a dash she has to interpret.
+function growthClause(result) {
+  const g = result.growth_next_year_pct;
+  if (g == null) return "";
+  const dir = g >= 0 ? "grow" : "fall";
+  return ` Analysts expect profit to ${dir} ${fmtPct(Math.abs(g) / 100)} next year.`;
+}
+
 function renderFlag(id, result) {
   const flagsDiv = document.getElementById("flags");
   const existing = document.getElementById(`flag-${id}`);
@@ -1309,6 +1324,7 @@ function renderFlag(id, result) {
       <div class="line">Current price: ${fmt(result.new_price)} · Stop loss: ${fmt(result.current_stop)}</div>
       <div class="line">Your exit plan: <strong>${result.exit_plan_label}</strong></div>
       <div class="line">Estimated ${gainWord}: ${fmt(result.total_gain)} · Estimated tax (26,375%): ${fmt(result.estimated_tax)}</div>
+      ${result.growth_next_year_pct != null ? `<div class="line">Analysts expect profit to ${result.growth_next_year_pct >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(result.growth_next_year_pct) / 100)} next year.</div>` : ""}
       ${consensusLine}
       <div class="actions">
         <button class="secondary" onclick="resetTrailingStop('${id}', ${result.new_price}, ${result.reset_new_stop})">Reset trailing stop to current price</button>
@@ -1325,7 +1341,9 @@ function renderFlag(id, result) {
     note.className = "panel no-trigger";
     const dayWord = result.day_change_pct >= 0 ? "up" : "down";
     const dayClause = result.day_change_pct == null ? "" : `is ${dayWord} by ${fmtPct(Math.abs(result.day_change_pct))} today, and `;
-    note.textContent = `${result.ticker} ${dayClause}is ${fmtPct(result.pct_above_stop)} above stop loss, no change is needed.`;
+    note.textContent =
+      `${result.ticker} ${dayClause}is ${fmtPct(result.pct_above_stop)} above stop loss, no change is needed.` +
+      growthClause(result);
     flagsDiv.prepend(note);
     return;
   }

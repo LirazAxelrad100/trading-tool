@@ -274,6 +274,7 @@ def list_holdings():
     holdings = load_holdings()
     for h in holdings:
         h.update(consensus_store.overlay_consensus(h["ticker"]))
+        h.update(zacks_import.overlay_growth(h["ticker"]))
     return holdings
 
 
@@ -846,6 +847,12 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
         "suggested_new_stop": None,
         "reset_new_stop": current_price * (1 - holding["trailing_pct"]),
         "analyst_consensus": None,
+        # The stop message is about the next few percent; this is about the next year.
+        # Put here rather than left to the frontend because the flag is rendered straight
+        # from this result after a refresh, before the holdings list is necessarily reloaded.
+        # None when the ticker is not in a Zacks Growth export yet — the line is dropped
+        # rather than shown empty, since a stop status should stay short.
+        "growth_next_year_pct": zacks_import.overlay_growth(holding["ticker"]).get("growth_next_year_pct"),
     }
     if triggered:
         result["suggested_new_stop"] = current_price * (1 - holding["trailing_pct"])
