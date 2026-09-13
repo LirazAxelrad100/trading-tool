@@ -216,7 +216,7 @@
             <th class="sortable" onclick="watchSortBy('move_1w')">1W % <span id="watch-arrow-move_1w" class="arrow"></span></th>
             <th class="sortable" onclick="watchSortBy('move_3m')">3M % <span id="watch-arrow-move_3m" class="arrow"></span></th>
             <th>Zacks / Cons. <span class="info" tabindex="0"><span class="tooltip"><strong>Zacks Rank / analyst consensus average.</strong> Zacks Rank: 1 (Strong Buy) to 5 (Strong Sell), from your last CSV import — dash if this ticker isn't in it. Consensus average: same 1–5 scale, from live analyst ratings fetched on refresh.</span></span></th>
-            <th>Why <span class="info" tabindex="0">i<span class="tooltip">Your reasoning, plus #tags to group tickers from the same idea. Click a tag above the table to filter.</span></span></th>
+            <th>Why <span class="info" tabindex="0">i<span class="tooltip">Your reasoning, plus #tags to group tickers from the same idea. Click a tag above the table to filter. The cell shows the newest entry — click it to read the whole note or add to it.</span></span></th>
             <th></th>
           </tr>
         </thead>
@@ -300,11 +300,24 @@
         <h2 id="thesis-modal-title"></h2>
         <button class="secondary" onclick="closeThesisModal()">Close</button>
       </div>
-      <p class="subtitle">Why you own this, and what would tell you the reasoning stopped holding. A year from now the numbers will still be here — this won't be, unless you write it.</p>
-      <textarea id="thesis-why" rows="7" placeholder="Why you own it — and what would tell you you're wrong.&#10;&#10;e.g. Biggest EU AI-infrastructure company, and the EU wants to stop depending on US providers.&#10;Wrong if: EU sovereign-cloud contracts keep going to AWS/Azure EU regions instead."></textarea>
-      <div class="add-form" style="margin-top:0.6rem">
-        <div style="flex:1"><label>Source link (optional)</label><input id="thesis-url" placeholder="https://…" /></div>
-        <button onclick="saveThesis()">Save</button>
+      <p class="subtitle" id="thesis-intro">Why you own this, and what would tell you the reasoning stopped holding. A year from now the numbers will still be here — this won't be, unless you write it.</p>
+
+      <div id="thesis-read">
+        <div id="thesis-read-body" class="thesis-read-body"></div>
+        <div class="actions" style="margin-top:0.8rem">
+          <button onclick="thesisAddEntry()">Add an entry</button>
+          <button class="secondary" onclick="thesisEditAll()">Edit the whole note</button>
+        </div>
+      </div>
+
+      <div id="thesis-edit" style="display:none">
+        <label id="thesis-edit-label" style="display:block;margin-bottom:0.3rem"></label>
+        <textarea id="thesis-why" rows="9" placeholder="Why you own it — and what would tell you you're wrong.&#10;&#10;e.g. Biggest EU AI-infrastructure company, and the EU wants to stop depending on US providers.&#10;Wrong if: EU sovereign-cloud contracts keep going to AWS/Azure EU regions instead."></textarea>
+        <div class="add-form" style="margin-top:0.6rem">
+          <div style="flex:1"><label>Source link (optional)</label><input id="thesis-url" placeholder="https://…" /></div>
+          <button onclick="saveThesis()">Save</button>
+          <button class="secondary" onclick="thesisCancelEdit()">Cancel</button>
+        </div>
       </div>
     </div>
   </div>

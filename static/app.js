@@ -1113,7 +1113,7 @@ async function render() {
         <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
         ${!h.isin && h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
         <button class="secondary" onclick="openLotsModal('${h.id}')">Lots</button>
-        <button class="secondary" onclick="openThesisModal('${h.id}')" title="${
+        <button class="secondary" onclick="openThesisModal('${h.id}', 'holding')" title="${
           h.why ? "Why you own this" : "Not written down yet"
         }">Why${h.why ? " ✓" : ""}</button>
         <button class="secondary" onclick="editHolding('${h.id}')">Edit</button>
@@ -1576,15 +1576,26 @@ function renderWatchlist() {
         <button class="danger" onclick="removeWatchItem('${w.id}')">Remove</button>
       </td>
     `;
-    // Built as an element rather than innerHTML so the user's own text can never be
+    // A preview that opens the modal, NOT an editable field. This cell used to be a
+    // single-line <input> holding the whole note; by 13.09.2026 several were six paragraphs
+    // long, and one stray click plus a keystroke would have replaced the lot on blur with no
+    // undo. Built as elements rather than innerHTML so the user's own text can never be
     // parsed as markup.
-    const whyInput = document.createElement("input");
-    whyInput.type = "text";
-    whyInput.className = "watch-note-input";
-    whyInput.placeholder = "Why — use #tags to group";
-    whyInput.value = w.why || "";
-    whyInput.addEventListener("change", () => saveWatchMeta(w.id, { why: whyInput.value }));
-    tr.querySelector(".watch-note-cell").appendChild(whyInput);
+    const noteBtn = document.createElement("button");
+    noteBtn.className = "watch-note-preview";
+    noteBtn.onclick = () => openThesisModal(w.id, "watch");
+    const text = (w.why || "").trim();
+    if (text) {
+      // The opening line, which is the newest entry now that notes are newest-first.
+      const first = text.split("\n").find((l) => l.trim()) || "";
+      noteBtn.textContent = first.length > 90 ? first.slice(0, 90) + "…" : first;
+      noteBtn.title = "Click to read the whole note";
+    } else {
+      noteBtn.textContent = "Add a note";
+      noteBtn.classList.add("subtitle");
+      noteBtn.title = "Nothing written down yet";
+    }
+    tr.querySelector(".watch-note-cell").appendChild(noteBtn);
     body.appendChild(tr);
   }
 }
@@ -2365,38 +2376,128 @@ async function checkOverlap() {
 
 let thesisHoldingId = null;
 
-function openThesisModal(id) {
-  const h = lastHoldings.find((x) => x.id === id);
-  if (!h) return;
-  thesisHoldingId = id;
-  document.getElementById("thesis-modal-title").textContent = `${h.ticker} — why you own it`;
-  document.getElementById("thesis-why").value = h.why || "";
-  document.getElementById("thesis-url").value = h.source_url || "";
+// The note is the most valuable thing in this tool and it used to be the least readable:
+// on the Watch List it lived in a single-line <input>, which by 13.09.2026 held six-paragraph
+// entries. One click into that box and a few keystrokes would have replaced the lot, saving
+// on blur, with no undo. So both lists now use this modal, and reading is separated from
+// editing — these get read far more often than written, and dropping straight into a textarea
+// is how a long note gets accidentally truncated.
+//
+// Notes are **newest-first**, feed style (the user's call, 13.09.2026). That matters for more
+// than reading order: the row preview shows the opening line, so with oldest-first the preview
+// showed the oldest thinking forever — TSM's preview would have read "zacks report #ai bubble"
+// from 09.08, five entries later.
+let thesisTarget = null; // {kind: "holding" | "watch", id}
+
+function thesisRecord(target) {
+  return target.kind === "watch"
+    ? watchlist.find((x) => x.id === target.id)
+    : lastHoldings.find((x) => x.id === target.id);
+}
+
+function openThesisModal(id, kind = "holding") {
+  thesisTarget = { kind, id };
+  const r = thesisRecord(thesisTarget);
+  if (!r) return;
+  document.getElementById("thesis-modal-title").textContent =
+    `${r.ticker} — ${kind === "watch" ? "why you're watching it" : "why you own it"}`;
+  document.getElementById("thesis-url").value = r.source_url || "";
+  renderThesisRead(r);
+  thesisShowRead();
   document.getElementById("thesis-modal").style.display = "flex";
+}
+
+// Built with textContent per paragraph rather than innerHTML: this is the user's own prose and
+// must never be parsed as markup.
+function renderThesisRead(r) {
+  const host = document.getElementById("thesis-read-body");
+  host.innerHTML = "";
+  const text = (r.why || "").trim();
+  if (!text) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Nothing written down yet.";
+    host.appendChild(empty);
+    return;
+  }
+  for (const para of text.split(/\n\n+/)) {
+    const el = document.createElement("p");
+    el.textContent = para;
+    host.appendChild(el);
+  }
+}
+
+function thesisShowRead() {
+  document.getElementById("thesis-read").style.display = "";
+  document.getElementById("thesis-edit").style.display = "none";
+}
+
+// Adding an entry opens an EMPTY box and prepends on save, so the existing note is never in a
+// textarea that could be cleared by accident. Editing the whole thing is still possible, just
+// not the default path.
+let thesisMode = "append";
+
+function thesisAddEntry() {
+  thesisMode = "append";
+  const d = new Date();
+  const stamp = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+  document.getElementById("thesis-edit-label").textContent = "New entry — it goes to the top of the note";
+  const box = document.getElementById("thesis-why");
+  box.value = `${stamp} — `;
+  document.getElementById("thesis-read").style.display = "none";
+  document.getElementById("thesis-edit").style.display = "";
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+function thesisEditAll() {
+  thesisMode = "replace";
+  const r = thesisRecord(thesisTarget);
+  document.getElementById("thesis-edit-label").textContent = "Editing the whole note";
+  document.getElementById("thesis-why").value = (r && r.why) || "";
+  document.getElementById("thesis-read").style.display = "none";
+  document.getElementById("thesis-edit").style.display = "";
+}
+
+function thesisCancelEdit() {
+  thesisShowRead();
 }
 
 function closeThesisModal() {
   document.getElementById("thesis-modal").style.display = "none";
-  thesisHoldingId = null;
+  thesisTarget = null;
 }
 
 async function saveThesis() {
-  if (!thesisHoldingId) return;
-  const res = await fetch(`/api/holdings/${thesisHoldingId}/thesis`, {
+  if (!thesisTarget) return;
+  const r = thesisRecord(thesisTarget);
+  const typed = document.getElementById("thesis-why").value.trim();
+  const existing = ((r && r.why) || "").trim();
+  const why =
+    thesisMode === "append" ? (typed && existing ? `${typed}\n\n${existing}` : typed || existing) : typed;
+
+  const url = thesisTarget.kind === "watch"
+    ? `/api/watchlist/${thesisTarget.id}/meta`
+    : `/api/holdings/${thesisTarget.id}/thesis`;
+  const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      why: document.getElementById("thesis-why").value,
-      source_url: document.getElementById("thesis-url").value.trim(),
-    }),
+    body: JSON.stringify({ why, source_url: document.getElementById("thesis-url").value.trim() }),
   });
   if (!res.ok) {
     const err = await res.json();
     alert(err.detail || "Could not save.");
     return;
   }
-  closeThesisModal();
-  await render();
+  if (thesisTarget.kind === "watch") {
+    await loadWatchlist();
+    const updated = thesisRecord(thesisTarget);
+    if (updated) renderThesisRead(updated);
+    thesisShowRead();
+  } else {
+    closeThesisModal();
+    await render();
+  }
 }
 
 function openLotsModal(id) {
