@@ -231,6 +231,9 @@ th.sortable:hover { color: var(--text); }
 .consensus-table td:last-child { text-align: right; font-weight: 600; }
 
 .modal-box-wide { width: 640px; max-height: 80vh; overflow-y: auto; }
+/* The notes modal holds prose, not a form. The base 360px is ~45 characters a line, which
+   reads like a poem; 720px lands around 70, which is where continuous text is easiest. */
+.modal-box-notes { width: 720px; max-height: 85vh; overflow-y: auto; }
 .analysis-text { white-space: pre-wrap; line-height: 1.5; font-size: 0.92rem; }
 
 .price-chart-header { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem; font-size: 1.05rem; }
@@ -325,7 +328,7 @@ td.nowrap { white-space: nowrap; }
 /* Reading view inside the thesis modal: real paragraphs at a readable width, scrolling rather
    than growing the dialog past the window — some notes run to nine paragraphs. */
 .thesis-read-body {
-  max-height: 22rem;
+  max-height: 30rem;
   overflow-y: auto;
   padding-right: 0.4rem;
 }

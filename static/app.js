@@ -2422,7 +2422,11 @@ function renderThesisRead(r) {
   }
   for (const para of text.split(/\n\n+/)) {
     const el = document.createElement("p");
-    el.textContent = para;
+    // Escape first, then turn **bold** into real bold — the same order as renderAnalysisText.
+    // The escape is what keeps this safe: it is the user's own prose, but prose that has had
+    // markdown written into it, and raw asterisks all over a note make it harder to read than
+    // the emphasis makes it easier.
+    el.innerHTML = escapeHtml(para).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     host.appendChild(el);
   }
 }
