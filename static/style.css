@@ -304,3 +304,33 @@ td.nowrap { white-space: nowrap; }
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* The Why cell is a preview that opens the modal, not a field. Styled as text rather than a
+   button so a table row still reads as a table row, but it is a <button> for keyboard access. */
+.watch-note-preview {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  max-width: 22rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.watch-note-preview:hover { text-decoration: underline; }
+
+/* Reading view inside the thesis modal: real paragraphs at a readable width, scrolling rather
+   than growing the dialog past the window — some notes run to nine paragraphs. */
+.thesis-read-body {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding-right: 0.4rem;
+}
+.thesis-read-body p {
+  margin: 0 0 0.7rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
