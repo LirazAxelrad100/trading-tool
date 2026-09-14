@@ -337,3 +337,6 @@ td.nowrap { white-space: nowrap; }
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+.thesis-older-toggle { margin: 0.4rem 0 0; }
+.thesis-entry-rule { border: none; border-top: 1px solid var(--border); margin: 1rem 0 0.8rem; }

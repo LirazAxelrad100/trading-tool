@@ -2407,8 +2407,44 @@ function openThesisModal(id, kind = "holding") {
   document.getElementById("thesis-modal").style.display = "flex";
 }
 
-// Built with textContent per paragraph rather than innerHTML: this is the user's own prose and
-// must never be parsed as markup.
+// An entry starts at a paragraph opening with a date (13.09.2026 — …) or a #tag plus a date
+// (#screen — added 11.09.2026 …). A date mid-sentence or in brackets is a reference, not a new
+// entry. Same rule as the one-off migration that reversed these notes to newest-first, and it
+// has to stay in sync with it: entries run to several paragraphs, so splitting on paragraphs
+// alone would cut them in half.
+const THESIS_ENTRY_START = /^(?:#[\w-]+\s*[—-]\s*)?(?:added\s+)?\d{2}\.\d{2}\.\d{4}\b/;
+
+function splitThesisEntries(text) {
+  const entries = [];
+  let cur = [];
+  for (const para of text.split(/\n\n+/)) {
+    if (THESIS_ENTRY_START.test(para.trim()) && cur.length) {
+      entries.push(cur);
+      cur = [para];
+    } else {
+      cur.push(para);
+    }
+  }
+  if (cur.length) entries.push(cur);
+  return entries;
+}
+
+// Escape first, then turn **bold** into real bold — the same order as renderAnalysisText. The
+// escape is what keeps this safe: it is the user's own prose, but prose with markdown written
+// into it, and raw asterisks throughout make a note harder to read than the emphasis makes it
+// easier.
+function appendThesisParas(host, paras) {
+  for (const para of paras) {
+    const el = document.createElement("p");
+    el.innerHTML = escapeHtml(para).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    host.appendChild(el);
+  }
+}
+
+// Only the newest entry is shown; the rest collapse behind a button. These notes are append-only
+// and the user predicted the obvious end state — "if we don't trim they will keep growing to the
+// point that I can't read it". Collapsing rather than trimming keeps every past decision while
+// the note stays as short on screen as the newest entry, however many there are.
 function renderThesisRead(r) {
   const host = document.getElementById("thesis-read-body");
   host.innerHTML = "";
@@ -2420,15 +2456,33 @@ function renderThesisRead(r) {
     host.appendChild(empty);
     return;
   }
-  for (const para of text.split(/\n\n+/)) {
-    const el = document.createElement("p");
-    // Escape first, then turn **bold** into real bold — the same order as renderAnalysisText.
-    // The escape is what keeps this safe: it is the user's own prose, but prose that has had
-    // markdown written into it, and raw asterisks all over a note make it harder to read than
-    // the emphasis makes it easier.
-    el.innerHTML = escapeHtml(para).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    host.appendChild(el);
+
+  const entries = splitThesisEntries(text);
+  appendThesisParas(host, entries[0]);
+  if (entries.length === 1) return;
+
+  const older = document.createElement("div");
+  older.style.display = "none";
+  for (const e of entries.slice(1)) {
+    const rule = document.createElement("hr");
+    rule.className = "thesis-entry-rule";
+    older.appendChild(rule);
+    appendThesisParas(older, e);
   }
+
+  const toggle = document.createElement("button");
+  toggle.className = "secondary thesis-older-toggle";
+  const n = entries.length - 1;
+  toggle.textContent = `Show ${n} older ${n === 1 ? "entry" : "entries"}`;
+  toggle.onclick = () => {
+    const open = older.style.display !== "none";
+    older.style.display = open ? "none" : "";
+    toggle.textContent = open
+      ? `Show ${n} older ${n === 1 ? "entry" : "entries"}`
+      : `Hide older ${n === 1 ? "entry" : "entries"}`;
+  };
+  host.appendChild(toggle);
+  host.appendChild(older);
 }
 
 function thesisShowRead() {
