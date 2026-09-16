@@ -98,7 +98,7 @@ def from_finnhub(shape: dict, metrics: dict) -> dict:
     """Watch List tier. `shape` is prices.fetch_quote_shape(), `metrics` is
     prices.fetch_metrics() — both already fetched during a watchlist refresh."""
     close = shape.get("close")
-    day_change = shape.get("day_change_pct")
+    day_change = shape.get("day_move_pct")  # whole percent, see fetch_quote_shape
     run_up_5d = metrics.get("5DayPriceReturnDaily")
     high_52w = metrics.get("52WeekHigh")
 
@@ -117,7 +117,7 @@ def from_finnhub(shape: dict, metrics: dict) -> dict:
         "source": "finnhub",
         "state": _state(breakout, extended, day_change),
         "trend": _trend(ret_3m, pct_from_high),
-        "day_change_pct": day_change,
+        "day_move_pct": day_change,
         "close_location": _close_location(close, shape.get("high"), shape.get("low")),
         "run_up_5d_pct": run_up_5d,
         "ret_3m_pct": ret_3m,

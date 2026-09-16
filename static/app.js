@@ -820,7 +820,9 @@ function renderMomentum(m) {
     m.state === "burst" && m.trend !== "downtrend" ? "price-up" : m.state === "quiet" ? "" : "price-down";
 
   const facts = [];
-  if (m.day_change_pct != null) facts.push(`today ${fmtPct(m.day_change_pct / 100)}`);
+  // day_move_pct is a whole percent (5,25), unlike a holding's day_change_pct, which is a
+  // ratio (0,0525) — hence the /100 here and none in fmtDayChangePct. One name, one unit.
+  if (m.day_move_pct != null) facts.push(`today ${fmtPct(m.day_move_pct / 100)}`);
   if (m.run_up_5d_pct != null) facts.push(`5 days ${fmtPct(m.run_up_5d_pct / 100)}`);
   if (m.pct_from_52w_high != null) facts.push(`${fmtPct(m.pct_from_52w_high / 100)} from its 12-month high`);
 
