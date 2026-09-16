@@ -115,6 +115,24 @@ def build_sector_strength() -> dict:
             "ret_3m": (last - closes[-TRADING_DAYS_3M - 1]) / closes[-TRADING_DAYS_3M - 1],
         }
 
+    # A partial build must never replace a complete one. Alpha Vantage's 25/day cap is shared
+    # with price charts and Analyze, so a rebuild late in the day can lose the last few ETFs —
+    # and every failure here is silent above (`continue`). The ranks would then be computed
+    # against a short list: a sector could read "3rd of 9" when it is really 3rd of 11, and
+    # a missing sector cannot be distinguished from one that scored badly. Keeping yesterday's
+    # complete ranking is the better of the two wrong answers, and it says so out loud.
+    if len(sectors) < len(SECTOR_ETF):
+        existing = _load_json(STRENGTH_FILE, None)
+        if existing and len(existing.get("sectors") or {}) > len(sectors):
+            return {
+                "error": "Only %d of %d sectors could be fetched (Alpha Vantage's daily limit "
+                         "is shared with price charts). Kept the previous ranking from %s."
+                         % (len(sectors), len(SECTOR_ETF),
+                            (existing.get("generated_at") or "")[:10]),
+                "partial": True,
+                **existing,
+            }
+
     ranked = sorted(sectors.items(), key=lambda kv: kv[1]["ret_3m"], reverse=True)
     total = len(ranked)
     for i, (_, d) in enumerate(ranked, start=1):

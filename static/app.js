@@ -365,15 +365,27 @@ function renderConcentration(c) {
   for (const g of c.groups) {
     // A weak weakest-link means the bloc was chained together through a middle holding
     // rather than every member moving with every other — worth saying rather than hiding.
+    // A weak weakest-link gets its own sentence rather than a caveat bolted onto the strong
+    // claim: if two members barely move together, "they behave like one position of 48%" is
+    // simply not true of them, and softening it with "but" still leaves it on the screen.
     const loose = g.min_correlation < 0.4;
+    const weakest = g.weakest_pair ? g.weakest_pair.join(" and ") : "one pair";
+    const reading = loose
+      ? `<p>Not all of them move with each other, though. ${weakest} barely do (${fmt(
+          g.min_correlation
+        )}), so this is a chain rather than one block: each one moves with the next, and the group is held together by its weakest link. Read it as a warning to check, not as ${fmtPct(
+          g.weight_pct / 100
+        )} of one bet.</p>`
+      : `<p>A single piece of news that moves one is likely to move the rest, so they behave more like one position of ${fmtPct(
+          g.weight_pct / 100
+        )} than ${g.tickers.length} separate ones.</p>`;
     parts.push(`
       <div class="tensions">
         <strong>${g.tickers.join(" · ")} — ${fmtPct(g.weight_pct / 100)} of the portfolio</strong>
         <p>These have risen and fallen together over the period (average correlation ${fmt(
           g.avg_correlation
-        )}${loose ? `, but as low as ${fmt(g.min_correlation)} for one pair` : ""}). A single piece of news that moves one is likely to move the rest, so they behave more like one position of ${fmtPct(
-      g.weight_pct / 100
-    )} than ${g.tickers.length} separate ones.</p>
+        )}).</p>
+        ${reading}
       </div>`);
   }
 
@@ -402,13 +414,19 @@ function renderConcentration(c) {
   }
   if (c.excluded.length) {
     parts.push(
-      `<p class="subtitle">Not included: ${c.excluded
+      `<p class="subtitle">Not included yet: ${c.excluded
         .map((e) => `${e.ticker} — ${e.reason}`)
-        .join(" · ")}. Buying or selling changes a holding's recorded value without the price moving, which would look like a huge one-day swing.</p>`
+        .join(" · ")}. They join on their own once enough days are recorded. Days when you bought or sold are skipped, because the recorded value changes then without the price moving.</p>`
     );
   }
   parts.push(
-    `<p class="subtitle">Based on ${c.returns} days of recorded values (${c.from_date} to ${c.to_date}). That is a short run, so treat single pairs as tentative — a group is more trustworthy when several holdings agree. It gets steadier as more days are recorded.</p>`
+    `<p class="subtitle">Based on ${c.returns} days of recorded values (${c.from_date} to ${
+      c.to_date
+    }).${
+      c.window_trimmed
+        ? ` Only the last ${c.window_days} days count, so older behaviour drops off and this describes now.`
+        : ""
+    } That is a short run, so treat single pairs as tentative; a group is more trustworthy when several holdings agree.</p>`
   );
   container.innerHTML = parts.join("");
 }

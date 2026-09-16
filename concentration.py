@@ -8,15 +8,31 @@ was wrong in an important way.
 
 Free. `data/holdings_history.json` already records each holding's value once a day, and while
 the share count is unchanged a change in value *is* a change in price, so no price history
-needs fetching. That assumption is the one real trap here, and `_changed_shares()` guards it:
-a sale or a new lot inside the window moves the value without the price moving, which would
-otherwise read as a huge fake one-day return and corrupt every correlation that ticker is in.
+needs fetching. That assumption is the one real trap here, and `_changed_dates()` guards it:
+a sale or a new lot moves the value without the price moving, which would otherwise read as a
+huge fake one-day return and corrupt every correlation that ticker is in.
+
+The guard used to drop the whole holding, and the window started at the first day ever
+recorded. Together those made the panel accumulate rather than refresh: by 2026-09-16 it was
+measuring 33 days from 2026-08-15 with that start date frozen for good, so VLO, LNVGY and DK
+were excluded permanently for lots bought on 2026-08-18, and TSM and DELL joined them the day
+they were bought. A holding that changes shares once would never be seen again.
+
+Two changes fix that. The window is the last `WINDOW_DAYS` days, so old behaviour falls off
+the back. And a share change now masks **only the days it touches** — a new lot spoils the
+return into that day and the one out of it, not the other eighty-eight — leaving every clean
+day in the series. Days are therefore masked per ticker, so a pair is correlated over the days
+both of them can vouch for, and a pair needs `MIN_RETURNS` shared days to be compared at all.
+The same mask covers a holding bought mid-window, which simply has no value recorded on the
+earlier days: it joins the panel on its own once it has enough days, instead of being excluded
+by a rule it can never satisfy.
 
 Descriptive only — it names the blocs and their combined weight, and never suggests what to
 do about them.
 """
 
 import collections
+import datetime
 import math
 import statistics
 from typing import Optional
@@ -27,6 +43,11 @@ from typing import Optional
 # grouping can chain A-B-C together on two edges while A and C barely relate.
 CORRELATION_THRESHOLD = 0.5
 MIN_RETURNS = 10
+
+# Only the last three months are measured. Without this the window started at the first day
+# ever recorded and never moved, so the panel would eventually be describing last August
+# alongside last week and calling the mixture "now".
+WINDOW_DAYS = 90
 
 
 def _returns(values: list) -> list:
@@ -46,15 +67,71 @@ def _correlation(a: list, b: list) -> float:
     return sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b)) / (dev_a * dev_b)
 
 
-def _changed_shares(holding: dict, sales: list, since: str) -> bool:
-    """Did this position's share count move during the window? Then its recorded value
-    changed for a reason other than price, and its returns are unusable."""
+def _pair_correlation(a: list, b: list) -> Optional[float]:
+    """Correlate two masked series over the days both can vouch for. None when they don't
+    share enough of them — a number from four days is not a weaker answer, it is a different
+    question."""
+    both = [(x, y) for x, y in zip(a, b) if x is not None and y is not None]
+    if len(both) < MIN_RETURNS:
+        return None
+    return _correlation([x for x, _ in both], [y for _, y in both])
+
+
+def _changed_dates(holding: dict, sales: list) -> set:
+    """The dates this position's share count moved. On those days its recorded value changed
+    for a reason other than price."""
     ticker = holding["ticker"]
-    # sales_history stores `sell_datetime` ("2026-07-27T16:19"), not `sell_date`; the ISO
-    # prefix compares correctly against a plain date string.
-    if any(s.get("ticker") == ticker and (s.get("sell_datetime") or "") >= since for s in sales):
-        return True
-    return any((lot.get("purchase_date") or "") >= since for lot in holding.get("lots") or [])
+    dates = {(lot.get("purchase_date") or "")[:10] for lot in holding.get("lots") or []}
+    # sales_history stores `sell_datetime` ("2026-07-27T16:19"), not `sell_date`.
+    dates |= {
+        (s.get("sell_datetime") or s.get("sell_date") or "")[:10]
+        for s in sales if s.get("ticker") == ticker
+    }
+    return {d for d in dates if d}
+
+
+def _masked_returns(values: list, dirty: list) -> list:
+    """Daily log returns aligned to the dates that produced `values`, with None wherever the
+    number would not be a clean price move: a missing snapshot, or a day the share count
+    changed. Both ends of a change are dropped — the snapshot is taken at one moment in the
+    day, so a purchase can land either side of it, and one extra day out of ninety is a
+    cheaper mistake than one fabricated 300% return."""
+    out = []
+    for i in range(1, len(values)):
+        before, after = values[i - 1], values[i]
+        if before is None or after is None or before <= 0 or after <= 0:
+            out.append(None)
+        elif dirty[i] or dirty[i - 1]:
+            out.append(None)
+        else:
+            out.append(math.log(after / before))
+    return out
+
+
+def _series_by_ticker(holdings: list, by_ticker: dict, sales: list, dates: list) -> dict:
+    """Masked return series per held ticker, all aligned to the same date list."""
+    series = {}
+    for holding in holdings:
+        ticker = holding["ticker"]
+        points = by_ticker.get(ticker, {})
+        changed = _changed_dates(holding, sales)
+        values = [points.get(d) for d in dates]
+        dirty = [d in changed for d in dates]
+        series[ticker] = _masked_returns(values, dirty)
+    return series
+
+
+def _usable_days(series: list) -> int:
+    return sum(1 for r in series if r is not None)
+
+
+def _window(dates: list) -> list:
+    """The last WINDOW_DAYS of recorded dates, so the panel describes now rather than
+    everything since recording began."""
+    if not dates:
+        return dates
+    cutoff = datetime.date.fromisoformat(dates[-1]) - datetime.timedelta(days=WINDOW_DAYS)
+    return [d for d in dates if d >= cutoff.isoformat()]
 
 
 def _group(tickers: list, correlations: dict) -> list:
@@ -69,7 +146,7 @@ def _group(tickers: list, correlations: dict) -> list:
         return t
 
     for (a, b), corr in correlations.items():
-        if corr >= CORRELATION_THRESHOLD:
+        if corr is not None and corr >= CORRELATION_THRESHOLD:
             ra, rb = find(a), find(b)
             if ra != rb:
                 parent[ra] = rb
@@ -89,21 +166,24 @@ WORST_DAY_SHARE = 0.25
 MIN_WORST_DAYS = 4
 
 
-def _down_day_behaviour(returns_by_ticker: dict, dates: list, portfolio: list) -> Optional[dict]:
+def _down_day_behaviour(returns_by_ticker: dict, portfolio: list) -> Optional[dict]:
     """On the days the whole portfolio fell hardest, what did each holding do? A holding that
     still rose on those days genuinely cushioned; one that fell harder than the portfolio
     amplified the move regardless of how independent it looks on an average day."""
-    if len(portfolio) < MIN_WORST_DAYS * 2:
+    days = [i for i, r in enumerate(portfolio) if r is not None]
+    if len(days) < MIN_WORST_DAYS * 2:
         return None
-    count = max(MIN_WORST_DAYS, int(len(portfolio) * WORST_DAY_SHARE))
-    worst = sorted(range(len(portfolio)), key=lambda i: portfolio[i])[:count]
+    count = max(MIN_WORST_DAYS, int(len(days) * WORST_DAY_SHARE))
+    worst = sorted(days, key=lambda i: portfolio[i])[:count]
     if all(portfolio[i] >= 0 for i in worst):
         return None
 
     rows = []
     for ticker, series in returns_by_ticker.items():
-        picked = [series[i] for i in worst if i < len(series)]
-        if not picked:
+        picked = [series[i] for i in worst if i < len(series) and series[i] is not None]
+        # "fell on 2 of 8" from a holding that was only there for two of them is noise
+        # dressed as a finding; the row is left out rather than shown with a caveat.
+        if len(picked) < MIN_WORST_DAYS:
             continue
         rows.append({
             "ticker": ticker,
@@ -111,6 +191,8 @@ def _down_day_behaviour(returns_by_ticker: dict, dates: list, portfolio: list) -
             "fell_on": sum(1 for r in picked if r < 0),
             "of_days": len(picked),
         })
+    if not rows:
+        return None
     rows.sort(key=lambda r: r["avg_return_pct"])
     return {
         "days_used": count,
@@ -145,7 +227,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     if base.get("error"):
         return base
 
-    dates = sorted({p["date"] for p in history})
+    dates = _window(sorted({p["date"] for p in history}))
     by_ticker = collections.defaultdict(dict)
     for p in history:
         by_ticker[p["ticker"]][p["date"]] = p["value"]
@@ -173,34 +255,38 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     if len(shared) < MIN_WORST_DAYS * 2:
         return {"error": f"Not enough overlapping days to compare {ticker} against your holdings."}
 
-    candidate = _returns([closes[d] for d in shared])
+    # Masked rather than filtered, so it stays index-aligned with the holdings' own series —
+    # a silently dropped day would shift every comparison by one.
+    candidate = _masked_returns([closes[d] for d in shared], [False] * len(shared))
     # Subtract the market's own move from every series. Raw correlation over a few weeks is
     # inflated by the fact that most stocks fall on the days the market falls, so a candidate
     # can score ~0.5 against a bloc simply for being a normal risky US stock. Measured live
     # (2026-09-05): AMD/WDC held at +0.62 -> +0.64 through the adjustment (genuinely linked)
     # while NBIS/NVDA fell +0.42 -> +0.28 (a third of it was just the market).
-    market_returns = _returns([market[d] for d in shared]) if market else None
-    if market_returns and len(market_returns) != len(candidate):
+    market_returns = (
+        _masked_returns([market[d] for d in shared], [False] * len(shared)) if market else None
+    )
+    if market_returns and any(m is None for m in market_returns):
         market_returns = None
     if market_returns:
-        candidate = [r - m for r, m in zip(candidate, market_returns)]
+        candidate = [
+            r - m if r is not None else None
+            for r, m in zip(candidate, market_returns)
+        ]
 
-    held = {h["ticker"]: h for h in holdings}
     sales = sales or []
 
     pairs = []
-    for other in sorted(by_ticker):
-        if other not in held or _changed_shares(held[other], sales, shared[0]):
-            continue
-        values = [by_ticker[other].get(d) for d in shared]
-        if any(v is None for v in values):
-            continue
-        series = _returns(values)
-        if len(series) != len(candidate):
-            continue
+    for other, series in sorted(_series_by_ticker(holdings, by_ticker, sales, shared).items()):
         if market_returns:
-            series = [r - m for r, m in zip(series, market_returns)]
-        pairs.append({"ticker": other, "correlation": _correlation(candidate, series)})
+            series = [
+                r - m if r is not None else None
+                for r, m in zip(series, market_returns)
+            ]
+        corr = _pair_correlation(candidate, series)
+        if corr is None:
+            continue
+        pairs.append({"ticker": other, "correlation": corr})
 
     if not pairs:
         return {"error": f"No holding has a comparable run of days against {ticker}."}
@@ -213,7 +299,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     )
     return {
         "ticker": ticker,
-        "days": len(candidate),
+        "days": _usable_days(candidate),
         "pairs": pairs,
         "linked": linked,
         "joins_group": joins["tickers"] if joins else None,
@@ -228,28 +314,29 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
     if not holdings or not history:
         return {"error": "No holdings history recorded yet."}
 
-    dates = sorted({p["date"] for p in history})
+    recorded = sorted({p["date"] for p in history})
+    dates = _window(recorded)
     since = dates[0]
     by_ticker = collections.defaultdict(dict)
     for p in history:
         by_ticker[p["ticker"]][p["date"]] = p["value"]
 
-    held = {h["ticker"]: h for h in holdings}
     total = sum(h["shares"] * h["current_price"] for h in holdings) or 1
     weights = {h["ticker"]: h["shares"] * h["current_price"] / total * 100 for h in holdings}
 
+    all_series = _series_by_ticker(holdings, by_ticker, sales, dates)
     usable, excluded = {}, []
-    for ticker, holding in held.items():
-        points = by_ticker.get(ticker, {})
-        if len(points) < len(dates):
-            excluded.append({"ticker": ticker, "reason": "not tracked for the whole period"})
-            continue
-        if _changed_shares(holding, sales, since):
-            excluded.append({"ticker": ticker, "reason": "shares bought or sold during the period"})
-            continue
-        series = _returns([points[d] for d in dates])
-        if len(series) < MIN_RETURNS:
-            excluded.append({"ticker": ticker, "reason": "not enough days recorded"})
+    for ticker, series in sorted(all_series.items()):
+        days = _usable_days(series)
+        if days < MIN_RETURNS:
+            excluded.append({
+                "ticker": ticker,
+                "days": days,
+                "reason": (
+                    "no full day recorded yet" if not days
+                    else "only %d clean days so far, %d are needed" % (days, MIN_RETURNS)
+                ),
+            })
             continue
         usable[ticker] = series
 
@@ -260,7 +347,7 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
     correlations = {}
     for i, a in enumerate(tickers):
         for b in tickers[i + 1:]:
-            correlations[(a, b)] = _correlation(usable[a], usable[b])
+            correlations[(a, b)] = _pair_correlation(usable[a], usable[b])
 
     groups, singles = [], []
     for members in _group(tickers, correlations):
@@ -269,30 +356,48 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
             singles.append({"ticker": members[0], "weight_pct": weight})
             continue
         pairs = [
-            correlations[(a, b)]
+            (correlations[(a, b)], a, b)
             for i, a in enumerate(members)
             for b in members[i + 1:]
+            if correlations[(a, b)] is not None
         ]
+        if not pairs:
+            continue
+        weakest = min(pairs)
         groups.append({
             "tickers": members,
             "weight_pct": weight,
-            "avg_correlation": statistics.mean(pairs),
-            "min_correlation": min(pairs),
+            "avg_correlation": statistics.mean(p[0] for p in pairs),
+            "min_correlation": weakest[0],
+            # Connected components chain A-B-C together on two edges even when A and C barely
+            # relate, so the weakest pair is named: a six-name bloc can be one borderline link
+            # away from being two, and "48% of the portfolio is one bet" is too big a claim to
+            # make without showing what holds it together.
+            "weakest_pair": [weakest[1], weakest[2]],
         })
 
-    # The portfolio's own daily return, summed across the usable holdings only, so the
-    # "worst days" are the ones these holdings actually drove.
-    totals = []
-    for d in dates:
-        totals.append(sum(by_ticker[t][d] for t in usable))
-    portfolio_returns = _returns(totals)
+    # The portfolio's own daily return: each holding's return weighted by its share of the
+    # portfolio, over whichever holdings have a clean number that day. Summing the recorded
+    # values instead would make the basket's own composition move the total — a holding
+    # dropping out for a masked day would read as a crash.
+    portfolio_returns = []
+    for i in range(len(dates) - 1):
+        parts = [(weights.get(t, 0), s[i]) for t, s in usable.items() if s[i] is not None]
+        carried = sum(w for w, _ in parts)
+        portfolio_returns.append(
+            sum(w * r for w, r in parts) / carried if carried else None
+        )
 
     groups.sort(key=lambda g: -g["weight_pct"])
     singles.sort(key=lambda s: -s["weight_pct"])
     return {
-        "down_days": _down_day_behaviour(usable, dates, portfolio_returns),
+        "down_days": _down_day_behaviour(usable, portfolio_returns),
         "days": len(dates),
-        "returns": len(next(iter(usable.values()))),
+        "window_days": WINDOW_DAYS,
+        # Only worth telling her about the cap once it is actually throwing days away;
+        # until then "32 days, the last 90 days only" is two numbers explaining nothing.
+        "window_trimmed": len(dates) < len(recorded),
+        "returns": max(_usable_days(s) for s in usable.values()),
         "from_date": since,
         "to_date": dates[-1],
         "groups": groups,
