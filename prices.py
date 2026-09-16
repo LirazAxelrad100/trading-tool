@@ -165,7 +165,11 @@ def fetch_quote_shape(ticker: str) -> dict:
         "low": data.get("l"),
         "close": data.get("c"),
         "prev_close": data.get("pc"),
-        "day_change_pct": data.get("dp"),
+        # Deliberately NOT called day_change_pct: that name means a ratio everywhere else
+        # here (0,0525), while this is Finnhub's own whole percent (5,25) passed through for
+        # momentum.py, whose sibling fields are all whole percent too. Two units under one
+        # name is a trap — it read a real +5,25% day as "+0,05%" once.
+        "day_move_pct": data.get("dp"),
     }
 
 

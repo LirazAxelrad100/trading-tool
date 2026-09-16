@@ -622,7 +622,7 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
         "current_price": shape["close"] * rate,
         # Today's move sits alongside 1W and 3M as the same kind of number, rather than as
         # a separate "momentum" concept — one consistent trio of trailing returns.
-        "move_1d": shape.get("day_change_pct"),
+        "move_1d": shape.get("day_move_pct"),
         "move_1w": None,
         "move_3m": None,
         "score": None,
