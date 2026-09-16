@@ -1696,7 +1696,19 @@ function renderProfitVsPrice() {
   const host = document.getElementById("watch-profit-price");
   if (!host) return;
 
-  const priced = watchlist.filter((w) => w.profit_1y_pct != null);
+  // A row belongs here if it has ANY of these figures, not all of them. Filtering on the past
+  // profit alone dropped exactly the shape most worth seeing: PBF went from a -4,13 loss to a
+  // +15,73 profit, so Finnhub cannot compute a growth rate from a negative base and returns
+  // nothing — and the whole row vanished, taking its -44% forecast for next year with it. A
+  // missing past number should not hide an available future one.
+  const FIGURE_FIELDS = [
+    "profit_1y_pct",
+    "profit_latest_quarter_pct",
+    "pay_per_profit_pct",
+    "growth_this_year_pct",
+    "growth_next_year_pct",
+  ];
+  const priced = watchlist.filter((w) => FIGURE_FIELDS.some((f) => w[f] != null));
   if (!priced.length) {
     host.innerHTML = `<p class="subtitle">Refresh the watch list to see how each company's profits compare with its price.</p>`;
     return;
@@ -1737,11 +1749,19 @@ function renderProfitVsPrice() {
 
   const reports = (w) => (w.next_report_date ? fmtDate(w.next_report_date) : "—");
 
+  // Blank past-profit figures say why on hover. The common cause is a company whose profit
+  // crossed zero — a loss last year, a profit now — which is a recovery, not missing data.
+  const pastProfit = (w, field) =>
+    w[field] != null
+      ? coloredPct(w[field])
+      : `<span class="subtitle" title="No year-over-year figure — usually because profit crossed zero (a loss last year), or the company is too new to have a year-ago quarter.">—</span>`;
+
   const body = rows
     .map(
       (w) =>
-        `<tr><td>${escapeHtml(w.ticker)}</td><td>${coloredPct(w.profit_1y_pct)}</td><td>${coloredPct(
-          w.profit_latest_quarter_pct
+        `<tr><td>${escapeHtml(w.ticker)}</td><td>${pastProfit(w, "profit_1y_pct")}</td><td>${pastProfit(
+          w,
+          "profit_latest_quarter_pct"
         )}</td><td>${cell(w)}</td><td>${expected(w, "growth_this_year_pct")}</td><td>${expected(
           w,
           "growth_next_year_pct"
@@ -1749,7 +1769,7 @@ function renderProfitVsPrice() {
     )
     .join("");
 
-  const missing = watchlist.filter((w) => w.profit_1y_pct == null).map((w) => w.ticker);
+  const missing = watchlist.filter((w) => FIGURE_FIELDS.every((f) => w[f] == null)).map((w) => w.ticker);
 
   host.innerHTML = `
     <h3>Profits vs. price</h3>
