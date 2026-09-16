@@ -493,18 +493,23 @@ function renderPortfolioChart(points) {
     })
     .join("");
 
+  // "sold X · bought Y", not the net. The net is what distorts the line, but naming it
+  // "sold 2.088" on a day EUR 4.588 of FIX was sold and EUR 2.500 of TSM bought would be a
+  // wrong number against a real record. What she did is the gross pair; what the chart got
+  // wrong is the difference between them.
   const moveList = moves.length
-    ? `<p class="subtitle"><strong>Money you moved</strong> — these days stepped up or down without a price moving, so the line is not performance there:</p>
+    ? `<p class="subtitle"><strong>Money you moved</strong> — what you bought and sold on those days:</p>
        <table class="mini-table"><tbody>${moves
-         .map(
-           (p) => `<tr><td>${fmtDate(p.date)}</td><td>${
-             p.cash_flow > 0 ? "paid in" : "took out"
-           } ${fmt(Math.abs(p.cash_flow))} EUR</td><td class="subtitle">${
+         .map((p) => {
+           const did = [];
+           if (p.cash_sold >= 1) did.push(`sold ${fmt(p.cash_sold)} EUR`);
+           if (p.cash_bought >= 1) did.push(`bought ${fmt(p.cash_bought)} EUR`);
+           return `<tr><td>${fmtDate(p.date)}</td><td>${did.join(" · ")}</td><td class="subtitle">${
              p.real_change_pct == null
                ? ""
                : `that day was really ${coloredPct(p.real_change_pct)}`
-           }</td></tr>`
-         )
+           }</td></tr>`;
+         })
          .join("")}</tbody></table>`
     : "";
 
@@ -519,7 +524,7 @@ function renderPortfolioChart(points) {
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
       ${marks}
     </svg>
-    <p class="subtitle">The percentage is what the holdings earned — money you paid in or took out is taken out of it, so a deposit does not read as a gain.</p>
+    <p class="subtitle">The percentage is what your stocks earned. Buying or selling changes the total without any price moving, so those days do not count towards it.</p>
     ${moveList}`;
 }
 
