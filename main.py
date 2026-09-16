@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 import alpha_vantage
 import breadth
+import cash_flow
 import concentration
 import consensus_store
 import fundamentals
@@ -1248,7 +1249,12 @@ def refresh_opportunities_b():
 
 @app.get("/api/portfolio-history")
 def get_portfolio_history():
-    return load_portfolio_history()
+    """History points, with the days money moved in or out marked. A deposit raises the
+    recorded value without a price moving, so the chart would otherwise show a step the user
+    caused and read it as a gain — the same fault concentration.py guards with
+    `_changed_dates()`. Overlaid at read time rather than stored, so it stays correct when a
+    lot or a sale is corrected afterwards."""
+    return cash_flow.overlay(load_portfolio_history(), load_holdings(), load_sales_history())
 
 
 @app.get("/api/holdings-history")

@@ -462,12 +462,52 @@ function renderPortfolioChart(points) {
   const coords = values.map((v, i) => [i * stepX, h - ((v - min) / range) * h]);
   const first = values[0];
   const last = values[values.length - 1];
-  const changePct = ((last - first) / first) * 100;
-  const up = last >= first;
+  // (last - first) / first counts every deposit as a gain. Chain the daily moves with each
+  // day's money movement removed instead — on this portfolio the difference was 10,8% shown
+  // against 5,9% earned, so nearly half the "gain" was cash the user paid in.
+  let growth = 1;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1].value;
+    if (!prev || !points[i].value) continue;
+    growth *= (points[i].value - (points[i].cash_flow || 0)) / prev;
+  }
+  const changePct = (growth - 1) * 100;
+  const up = changePct >= 0;
   const color = up ? "var(--green)" : "var(--rust)";
   const linePath = coords.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
   const areaPath = `${linePath} L ${w} ${h} L 0 ${h} Z`;
   const anyApprox = points.some((p) => p.approx);
+
+  // Days money moved get a marker on the line. The step is real in euros but is not
+  // performance, and the line cannot tell the difference on its own.
+  const moves = points
+    .map((p, i) => ({ ...p, i }))
+    .filter((p) => p.cash_flow != null);
+  // A dashed vertical line only: the svg is drawn with preserveAspectRatio="none", so x and
+  // y scale differently and any round or angled marker comes out squashed. A vertical line
+  // is the one shape that survives that, and the table underneath carries the direction.
+  const marks = moves
+    .map((p) => {
+      const x = (p.i * stepX).toFixed(1);
+      return `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="var(--text)" stroke-width="1" stroke-dasharray="3 3" opacity="0.4"></line>`;
+    })
+    .join("");
+
+  const moveList = moves.length
+    ? `<p class="subtitle"><strong>Money you moved</strong> — these days stepped up or down without a price moving, so the line is not performance there:</p>
+       <table class="mini-table"><tbody>${moves
+         .map(
+           (p) => `<tr><td>${fmtDate(p.date)}</td><td>${
+             p.cash_flow > 0 ? "paid in" : "took out"
+           } ${fmt(Math.abs(p.cash_flow))} EUR</td><td class="subtitle">${
+             p.real_change_pct == null
+               ? ""
+               : `that day was really ${coloredPct(p.real_change_pct)}`
+           }</td></tr>`
+         )
+         .join("")}</tbody></table>`
+    : "";
+
   container.innerHTML = `
     <div class="price-chart-header">
       <strong>${fmt(last)} EUR</strong>
@@ -477,7 +517,10 @@ function renderPortfolioChart(points) {
     <svg viewBox="0 0 ${w} ${h}" class="price-chart-svg" preserveAspectRatio="none">
       <path d="${areaPath}" fill="${color}" opacity="0.15" stroke="none"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
-    </svg>`;
+      ${marks}
+    </svg>
+    <p class="subtitle">The percentage is what the holdings earned — money you paid in or took out is taken out of it, so a deposit does not read as a gain.</p>
+    ${moveList}`;
 }
 
 function isoWeekStart(dateStr) {
