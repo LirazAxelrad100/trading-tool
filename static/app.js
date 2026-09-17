@@ -529,6 +529,32 @@ function renderPortfolioChart(points) {
     cumulative.push((running - 1) * 100);
   }
 
+  // One bar per day, on a zero line: the line above shows where the money got to, this shows
+  // how it got there. Same cash-adjusted numbers as the hover, so a day money moved is not a
+  // fake spike. Scaled to the largest single day, since a fixed scale would flatten a quiet
+  // stretch into nothing and clip a shock.
+  const daily = cumulative.map((c, i) => (i === 0 ? null : c - cumulative[i - 1]));
+  const sizes = daily.filter((d) => d != null).map(Math.abs).sort((a, b) => a - b);
+  const biggest = sizes.length ? sizes[sizes.length - 1] : 0;
+  // Scaled to the 90th percentile, not the maximum. The first recorded day here is +9,0%,
+  // which is the tool being set up rather than a market move, and scaling to it squashed
+  // every ordinary day into a stub. Anything above the line still draws full height, so the
+  // outlier is visibly the biggest — it just stops deciding how the rest are drawn.
+  const scale = Math.max(sizes[Math.floor(sizes.length * 0.9)] || 0, 0.5);
+  const barH = 34;
+  const mid = barH / 2;
+  const barW = Math.max(1.5, stepX * 0.55);
+  const bars = daily
+    .map((d, i) => {
+      if (d == null) return "";
+      const height = Math.max(1, Math.min(1, Math.abs(d) / scale) * (mid - 2));
+      const y = d >= 0 ? mid - height : mid;
+      return `<rect x="${(i * stepX - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(
+        1
+      )}" height="${height.toFixed(1)}" fill="${d >= 0 ? "var(--green)" : "var(--rust)"}" opacity="0.8"></rect>`;
+    })
+    .join("");
+
   container.innerHTML = `
     <div class="price-chart-header">
       <strong>${fmt(last)} EUR</strong>
@@ -542,41 +568,54 @@ function renderPortfolioChart(points) {
       ${marks}
       <line id="portfolio-cursor" x1="0" y1="0" x2="0" y2="${h}" stroke="var(--text)" stroke-width="1" opacity="0"></line>
     </svg>
+    <svg viewBox="0 0 ${w} ${barH}" class="price-chart-bars" preserveAspectRatio="none">
+      <line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="var(--border)" stroke-width="1"></line>
+      ${bars}
+      <line id="portfolio-cursor-bars" x1="0" y1="0" x2="0" y2="${barH}" stroke="var(--text)" stroke-width="1" opacity="0"></line>
+    </svg>
+    <p class="subtitle">Each bar is one day, biggest ${fmtPct(biggest / 100)}.</p>
     <p class="subtitle">The percentage is what your stocks earned. Buying or selling changes the total without any price moving, so those days do not count towards it.</p>
     ${moveList}`;
 
   // Hover readout. The svg is stretched with preserveAspectRatio="none", so the cursor is
   // mapped through the element's real pixel width rather than the viewBox — reading x from
   // the viewBox would drift wider the further right you moved.
-  const svg = container.querySelector(".price-chart-svg");
   const readout = container.querySelector("#portfolio-readout");
-  const cursor = container.querySelector("#portfolio-cursor");
+  const cursors = [
+    container.querySelector("#portfolio-cursor"),
+    container.querySelector("#portfolio-cursor-bars"),
+  ].filter(Boolean);
   const idle = "&nbsp;";
 
-  svg.addEventListener("mousemove", (ev) => {
-    const box = svg.getBoundingClientRect();
-    if (!box.width) return;
-    const share = (ev.clientX - box.left) / box.width;
-    const i = Math.max(0, Math.min(points.length - 1, Math.round(share * (points.length - 1))));
-    const p = points[i];
-    const since = cumulative[i];
-    const day = i > 0 ? cumulative[i] - cumulative[i - 1] : null;
-    const moved =
-      p.cash_flow != null
-        ? ` · <span class="price-down">you ${p.cash_flow > 0 ? "bought" : "sold"} that day</span>`
-        : "";
-    readout.innerHTML = `${fmtDate(p.date)} · <strong>${fmt(p.value)} EUR</strong> · ${coloredPct(
-      since
-    )} since ${fmtDate(points[0].date)}${day == null ? "" : ` · ${coloredPct(day)} that day`}${moved}`;
-    cursor.setAttribute("x1", (i * stepX).toFixed(1));
-    cursor.setAttribute("x2", (i * stepX).toFixed(1));
-    cursor.setAttribute("opacity", "0.5");
-  });
+  // Both charts drive the same readout and both guide lines, so the line and the bars stay
+  // pinned to the same day whichever one the cursor is over.
+  for (const svg of container.querySelectorAll(".price-chart-svg, .price-chart-bars")) {
+    svg.addEventListener("mousemove", (ev) => {
+      const box = svg.getBoundingClientRect();
+      if (!box.width) return;
+      const share = (ev.clientX - box.left) / box.width;
+      const i = Math.max(0, Math.min(points.length - 1, Math.round(share * (points.length - 1))));
+      const p = points[i];
+      const day = daily[i];
+      const moved =
+        p.cash_flow != null
+          ? ` · <span class="price-down">you ${p.cash_flow > 0 ? "bought" : "sold"} that day</span>`
+          : "";
+      readout.innerHTML = `${fmtDate(p.date)} · <strong>${fmt(p.value)} EUR</strong> · ${coloredPct(
+        cumulative[i]
+      )} since ${fmtDate(points[0].date)}${day == null ? "" : ` · ${coloredPct(day)} that day`}${moved}`;
+      for (const c of cursors) {
+        c.setAttribute("x1", (i * stepX).toFixed(1));
+        c.setAttribute("x2", (i * stepX).toFixed(1));
+        c.setAttribute("opacity", "0.5");
+      }
+    });
 
-  svg.addEventListener("mouseleave", () => {
-    readout.innerHTML = idle;
-    cursor.setAttribute("opacity", "0");
-  });
+    svg.addEventListener("mouseleave", () => {
+      readout.innerHTML = idle;
+      for (const c of cursors) c.setAttribute("opacity", "0");
+    });
+  }
 }
 
 function isoWeekStart(dateStr) {
