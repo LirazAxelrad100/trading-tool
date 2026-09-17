@@ -134,6 +134,43 @@ def _window(dates: list) -> list:
     return [d for d in dates if d >= cutoff.isoformat()]
 
 
+# How far below the threshold still counts as "nearly". 0,48 against a 0,50 bar is not a
+# distinction anyone can defend, and calling such a holding independent is the more wrong of
+# the two available answers.
+NEAR_MISS = 0.10
+
+
+def _closest_link(ticker: str, tickers: list, correlations: dict, weights: dict) -> dict:
+    """The holding this one moves with most, when that is close to the grouping threshold.
+
+    A holding that misses the bar by two hundredths is filed under "moving on their own",
+    which reads as diversification it does not provide. Real case (2026-09-17): DK and VLO
+    correlate +0,48 — each other's strongest link by a wide margin, two refiners on the same
+    crack spreads — and the panel listed them as two independent positions worth 13,7%
+    between them. The user saw it before the tool said it: *"VLO and DK are not part of the
+    big bloc, but they do form kind of a bloc of thire own."*
+
+    Returned only for a near miss, so an actually-independent holding says nothing extra.
+    """
+    best, partner = None, None
+    for other in tickers:
+        if other == ticker:
+            continue
+        pair = (ticker, other) if (ticker, other) in correlations else (other, ticker)
+        corr = correlations.get(pair)
+        if corr is None:
+            continue
+        if best is None or corr > best:
+            best, partner = corr, other
+    if partner is None or best is None or best < CORRELATION_THRESHOLD - NEAR_MISS:
+        return {}
+    return {
+        "closest": partner,
+        "closest_correlation": best,
+        "closest_weight_pct": weights.get(ticker, 0) + weights.get(partner, 0),
+    }
+
+
 def _group(tickers: list, correlations: dict) -> list:
     """Connected components over pairs above the threshold: a bloc is a set of holdings
     linked by co-movement, directly or through another member."""
@@ -353,7 +390,8 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
     for members in _group(tickers, correlations):
         weight = sum(weights.get(t, 0) for t in members)
         if len(members) == 1:
-            singles.append({"ticker": members[0], "weight_pct": weight})
+            singles.append({"ticker": members[0], "weight_pct": weight,
+                            **_closest_link(members[0], tickers, correlations, weights)})
             continue
         pairs = [
             (correlations[(a, b)], a, b)
@@ -394,6 +432,9 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
         "down_days": _down_day_behaviour(usable, portfolio_returns),
         "days": len(dates),
         "window_days": WINDOW_DAYS,
+        # Sent rather than hardcoded in the UI, so the copy cannot drift from the bar the
+        # grouping actually used.
+        "threshold": CORRELATION_THRESHOLD,
         # Only worth telling her about the cap once it is actually throwing days away;
         # until then "32 days, the last 90 days only" is two numbers explaining nothing.
         "window_trimmed": len(dates) < len(recorded),
