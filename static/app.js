@@ -2867,7 +2867,7 @@ async function loadHistory() {
     const gainClass = e.realized_gain > 0 ? "price-up" : e.realized_gain < 0 ? "price-down" : "";
     tr.innerHTML = `
       <td>${e.ticker}</td>
-      <td>${e.shares_sold}</td>
+      <td>${fmtShares(e.shares_sold)}</td>
       <td>${fmt(e.cost_basis)}</td>
       <td>${fmt(e.total_spend)}</td>
       <td>${fmt(e.sale_price)}</td>
