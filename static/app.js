@@ -1645,6 +1645,39 @@ function showTab(name) {
   if (name === "watchlist") loadWatchlist();
 }
 
+const SUB_VIEWS = ["value", "weekly", "together", "market"];
+const SUB_VIEW_KEY = "tradingtool.subview";
+
+// The four "how has it gone" panels share one slot. The data for all four is already loaded
+// and cheap to keep — this only changes what is on screen, so switching is instant and
+// nothing refetches.
+function showSubView(name) {
+  for (const v of SUB_VIEWS) {
+    const pane = document.getElementById(`sub-${v}`);
+    const btn = document.getElementById(`sub-btn-${v}`);
+    if (!pane || !btn) continue;
+    pane.style.display = v === name ? "block" : "none";
+    btn.classList.toggle("active", v === name);
+  }
+  // Remembering the choice is a convenience, never a requirement: private windows and
+  // blocked site data both throw here, and the default view has to survive that.
+  try {
+    localStorage.setItem(SUB_VIEW_KEY, name);
+  } catch (e) {
+    /* not worth telling her about */
+  }
+}
+
+function restoreSubView() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(SUB_VIEW_KEY);
+  } catch (e) {
+    saved = null;
+  }
+  showSubView(SUB_VIEWS.includes(saved) ? saved : "value");
+}
+
 let watchlist = [];
 let watchSortField = null;
 let watchTagFilter = null;
@@ -3022,4 +3055,5 @@ async function removeSalesEntry(id) {
 }
 
 initInfoTooltips();
+restoreSubView();
 loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration()).then(() => loadBreadth());
