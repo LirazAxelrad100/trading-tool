@@ -21,6 +21,7 @@ import fundamentals
 import ls_tc
 import momentum
 import opportunities_b
+import tax
 import prices
 import sectors
 import synthesis
@@ -830,7 +831,13 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
 
     stop_hit = current_price <= stop_price
     total_gain = (stop_price - holding["cost_basis"]) * holding["shares"]
-    estimated_tax = max(0, total_gain) * CAPITAL_GAINS_TAX_RATE
+    # What selling would actually add to this year's tax, not the gain taxed on its own.
+    # Realised losses already sit in the Verlustverrechnungstopf and offset it — quoting the
+    # standalone 26,375% against a gain the year's losses already cover is an argument not to
+    # sell that isn't true (2026: €3.188 of losses banked against €3.017 of gains).
+    estimated_tax = tax.tax_on_next_gain(
+        load_sales_history(), str(date.today().year), total_gain
+    )["extra_tax"]
 
     pct_move = (current_price - reference_high) / reference_high
     triggered = pct_move >= TRIGGER_THRESHOLD
@@ -1245,6 +1252,16 @@ def refresh_opportunities_b():
         return opportunities_b.build()
     except PriceError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/sales-summary")
+def get_sales_summary(year: Optional[str] = None):
+    """What is actually owed for the year, losses netted off — see tax.py. The per-sale
+    figure each row carries is the gain taxed on its own, which is not how German
+    capital-gains tax works and overstated 2026 by €674 against a real net loss."""
+    sales = load_sales_history()
+    target = year or (tax.years(sales) or [str(date.today().year)])[0]
+    return tax.year_summary(sales, target)
 
 
 @app.get("/api/portfolio-history")

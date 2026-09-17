@@ -40,6 +40,10 @@ function fmtPct(n) {
   return euPctFormat.format(n * 100) + "%";
 }
 
+// For figures that are round by definition — a statutory allowance, not a computed amount.
+// "1.000,00 EUR" reads as something that was worked out; "1.000 EUR" reads as the rule it is.
+const euIntFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+
 const euSharesFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 8 });
 function fmtShares(n) {
   return euSharesFormat.format(Number(n));
@@ -2854,9 +2858,54 @@ function fmtSellDatetime(s) {
   return `${d.toLocaleDateString("de-DE")} ${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+// German capital-gains tax nets losses against gains within the year, so a per-sale figure
+// is not an estimate of anything — it is the gain taxed as if no loss had happened. The
+// column that did that summed to €674 of tax against a real net loss of €171.
+function renderSalesSummary(s) {
+  const box = document.getElementById("sales-summary");
+  if (!box) return;
+  if (!s || !s.sales) {
+    box.innerHTML = "";
+    return;
+  }
+  // The allowance is a round 1.000, so print it round — "1.000,00 EUR" reads as a
+  // calculated figure when it is a fixed rule.
+  const allowance = euIntFormat.format(s.allowance);
+  const owes = s.estimated_tax > 0;
+  const verdict = owes
+    ? `<p>After the ${allowance} EUR yearly allowance, ${fmt(
+        s.taxable
+      )} EUR is taxable — roughly <strong>${fmt(s.estimated_tax)} EUR</strong> of tax.</p>`
+    : s.carry_forward > 0
+    ? `<p>Your losses are bigger than your gains, so there is <strong>no tax to pay</strong> on these sales. The extra <strong>${fmt(
+        s.carry_forward
+      )} EUR</strong> of losses is not wasted — it comes off the tax on your future gains.</p>`
+    : `<p>Your gains are inside the ${fmt(
+        s.allowance
+      )} EUR yearly allowance, so there is <strong>no tax to pay</strong> on these sales.</p>`;
+
+  box.innerHTML = `
+    <div class="tensions">
+      <strong>${s.year} — ${s.sales} sales</strong>
+      <table class="mini-table"><tbody>
+        <tr><td>Profit on the ones that made money</td><td class="price-up">${fmt(s.gains)} EUR</td></tr>
+        <tr><td>Loss on the ones that lost money</td><td class="price-down">${fmt(s.losses)} EUR</td></tr>
+        <tr><td><strong>Together</strong></td><td><strong>${fmt(s.net)} EUR</strong></td></tr>
+      </tbody></table>
+      ${verdict}
+      <p class="subtitle">An estimate at 26,375% (tax plus Soli, no church tax). Trade Republic settles the real figure with the Finanzamt itself, and the ${allowance} EUR allowance is shared across every account you hold — so if you used some of it elsewhere, less of it is left here.</p>
+    </div>`;
+}
+
 async function loadHistory() {
   const res = await fetch("/api/sales-history");
   const entries = await res.json();
+  try {
+    const sres = await fetch("/api/sales-summary");
+    renderSalesSummary(await sres.json());
+  } catch (e) {
+    /* the table is the point; a missing summary must not empty it */
+  }
   const body = document.getElementById("history-body");
   const emptyMsg = document.getElementById("history-empty-msg");
   body.innerHTML = "";
@@ -2873,7 +2922,6 @@ async function loadHistory() {
       <td>${fmt(e.sale_price)}</td>
       <td>${fmt(e.total_sum)}</td>
       <td class="${gainClass}">${fmt(e.realized_gain)}</td>
-      <td>${fmt(e.estimated_tax)}</td>
       <td>${fmtSellDatetime(e.sell_datetime)}</td>
       <td><button class="danger" onclick="removeSalesEntry('${e.id}')">Remove</button></td>
     `;
