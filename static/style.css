@@ -237,9 +237,12 @@ th.sortable:hover { color: var(--text); }
 .analysis-text { white-space: pre-wrap; line-height: 1.5; font-size: 0.92rem; }
 
 .price-chart-header { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem; font-size: 1.05rem; }
-.price-chart-svg { width: 100%; height: 100px; display: block; margin-bottom: 0.75rem; cursor: crosshair; }
+.price-chart-svg { width: 100%; height: 100px; display: block; cursor: crosshair; }
 /* Holds its line height while empty so the chart doesn't jump as the cursor enters. */
 .chart-readout { min-height: 1.2em; margin: 0 0 0.35rem; }
+/* Deliberately short: one day's move is a small number and the row is a rhythm, not a
+   second chart competing with the line above it. */
+.price-chart-bars { width: 100%; height: 34px; display: block; margin-bottom: 0.5rem; cursor: crosshair; }
 
 .compare-bar { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; }
 
