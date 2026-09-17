@@ -517,19 +517,66 @@ function renderPortfolioChart(points) {
          .join("")}</tbody></table>`
     : "";
 
+  // Running cash-adjusted growth from the first point to each one, so hovering reads the
+  // same kind of number as the headline rather than a raw value difference.
+  const cumulative = [0];
+  let running = 1;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1].value;
+    if (prev && points[i].value) {
+      running *= (points[i].value - (points[i].cash_flow || 0)) / prev;
+    }
+    cumulative.push((running - 1) * 100);
+  }
+
   container.innerHTML = `
     <div class="price-chart-header">
       <strong>${fmt(last)} EUR</strong>
       <span class="${up ? "price-up" : "price-down"}">${changePct >= 0 ? "+" : ""}${euPctFormat.format(changePct)}%</span>
       <span class="subtitle">${points[0].date} → ${points[points.length - 1].date}${anyApprox ? " · early points are approximate" : ""}</span>
     </div>
+    <p class="chart-readout subtitle" id="portfolio-readout">&nbsp;</p>
     <svg viewBox="0 0 ${w} ${h}" class="price-chart-svg" preserveAspectRatio="none">
       <path d="${areaPath}" fill="${color}" opacity="0.15" stroke="none"></path>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
       ${marks}
+      <line id="portfolio-cursor" x1="0" y1="0" x2="0" y2="${h}" stroke="var(--text)" stroke-width="1" opacity="0"></line>
     </svg>
     <p class="subtitle">The percentage is what your stocks earned. Buying or selling changes the total without any price moving, so those days do not count towards it.</p>
     ${moveList}`;
+
+  // Hover readout. The svg is stretched with preserveAspectRatio="none", so the cursor is
+  // mapped through the element's real pixel width rather than the viewBox — reading x from
+  // the viewBox would drift wider the further right you moved.
+  const svg = container.querySelector(".price-chart-svg");
+  const readout = container.querySelector("#portfolio-readout");
+  const cursor = container.querySelector("#portfolio-cursor");
+  const idle = "&nbsp;";
+
+  svg.addEventListener("mousemove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    if (!box.width) return;
+    const share = (ev.clientX - box.left) / box.width;
+    const i = Math.max(0, Math.min(points.length - 1, Math.round(share * (points.length - 1))));
+    const p = points[i];
+    const since = cumulative[i];
+    const day = i > 0 ? cumulative[i] - cumulative[i - 1] : null;
+    const moved =
+      p.cash_flow != null
+        ? ` · <span class="price-down">you ${p.cash_flow > 0 ? "bought" : "sold"} that day</span>`
+        : "";
+    readout.innerHTML = `${fmtDate(p.date)} · <strong>${fmt(p.value)} EUR</strong> · ${coloredPct(
+      since
+    )} since ${fmtDate(points[0].date)}${day == null ? "" : ` · ${coloredPct(day)} that day`}${moved}`;
+    cursor.setAttribute("x1", (i * stepX).toFixed(1));
+    cursor.setAttribute("x2", (i * stepX).toFixed(1));
+    cursor.setAttribute("opacity", "0.5");
+  });
+
+  svg.addEventListener("mouseleave", () => {
+    readout.innerHTML = idle;
+    cursor.setAttribute("opacity", "0");
+  });
 }
 
 function isoWeekStart(dateStr) {
