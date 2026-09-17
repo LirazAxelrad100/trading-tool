@@ -415,6 +415,23 @@ function renderConcentration(c) {
         .map((s) => `${s.ticker} (${fmtPct(s.weight_pct / 100)})`)
         .join(" · ")}</p>`
     );
+    // A holding that missed the bar by a hundredth or two is not really on its own, and
+    // saying so matters more than the tidiness of the list it is in: two names at 0,48 are
+    // closer to one bet than to two.
+    const near = c.independent.filter((s) => s.closest);
+    const shown = new Set();
+    for (const s of near) {
+      const key = [s.ticker, s.closest].sort().join("-");
+      if (shown.has(key)) continue;
+      shown.add(key);
+      parts.push(
+        `<p class="subtitle">${s.ticker} and ${s.closest} nearly move together (${fmt(
+          s.closest_correlation
+        )}, just under the ${fmt(c.threshold)} line) — closer to one position of ${fmtPct(
+          s.closest_weight_pct / 100
+        )} than to two separate ones.</p>`
+      );
+    }
   }
   if (c.excluded.length) {
     parts.push(
