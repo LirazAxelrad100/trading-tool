@@ -53,6 +53,23 @@ h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
 .tab-btn:hover { color: var(--text); opacity: 1; }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
+/* Second level, inside one panel. Deliberately quieter than the top tabs — pills rather than
+   a second underlined row, so it reads as a choice within a section and not as a rival to the
+   main navigation. */
+.subtabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+.subtab-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.subtab-btn:hover { color: var(--text); opacity: 1; }
+.subtab-btn.active { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.subtab-content h2 { margin-top: 0; }
+
 .table-scroll { overflow-x: auto; }
 .watch-note-input { min-width: 180px; }
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }

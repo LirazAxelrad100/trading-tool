@@ -75,25 +75,40 @@
 
     <div id="flags"></div>
 
+    <!-- One panel, one view at a time. These four answer "how has it gone" rather than
+         "what do I hold", they are the tallest things on the page, and they are read
+         occasionally rather than daily — so stacking them all pushed the holdings table
+         off the screen for no gain. -->
     <div class="panel">
-      <h2>How much of the market is participating <span class="info" tabindex="0">i<span class="tooltip">The share of US stocks trading above their own 200-day and 50-day averages. A rise carried by most stocks is a different environment from one carried by a few — breakout setups fail more often in the second. Third-party public data, fetched once a day.</span></span></h2>
-      <div id="breadth"><p class="empty">Loading…</p></div>
-    </div>
-
-    <div class="panel">
-      <h2>Which holdings move together <span class="info" tabindex="0">i<span class="tooltip">Groups holdings whose daily values have risen and fallen together. The % Portfolio column shows how big each position is; this shows where several positions are really one bet. Built from values already recorded daily — no extra data is fetched. Descriptive only.</span></span></h2>
-      <div id="concentration"><p class="empty">Loading…</p></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <h2>Portfolio value over time</h2>
-        <button id="seed-portfolio-btn" class="secondary" onclick="seedPortfolioHistory()">Load past ~3 months (approx)</button>
+      <div class="subtabs" role="tablist">
+        <button class="subtab-btn active" id="sub-btn-value" role="tab" onclick="showSubView('value')">Value over time</button>
+        <button class="subtab-btn" id="sub-btn-weekly" role="tab" onclick="showSubView('weekly')">Week by week</button>
+        <button class="subtab-btn" id="sub-btn-together" role="tab" onclick="showSubView('together')">Move together</button>
+        <button class="subtab-btn" id="sub-btn-market" role="tab" onclick="showSubView('market')">The market</button>
       </div>
-      <div id="portfolio-chart"><p class="empty">Loading…</p></div>
 
-      <h3 class="weekly-table-heading">Weekly value by stock</h3>
-      <div id="weekly-table-container"><p class="empty">Loading…</p></div>
+      <div id="sub-value" class="subtab-content">
+        <div class="panel-header">
+          <h2>Portfolio value over time</h2>
+          <button id="seed-portfolio-btn" class="secondary" onclick="seedPortfolioHistory()">Load past ~3 months (approx)</button>
+        </div>
+        <div id="portfolio-chart"><p class="empty">Loading…</p></div>
+      </div>
+
+      <div id="sub-weekly" class="subtab-content" style="display:none">
+        <h2>Weekly value by stock</h2>
+        <div id="weekly-table-container"><p class="empty">Loading…</p></div>
+      </div>
+
+      <div id="sub-together" class="subtab-content" style="display:none">
+        <h2>Which holdings move together <span class="info" tabindex="0">i<span class="tooltip">Groups holdings whose daily values have risen and fallen together. The % Portfolio column shows how big each position is; this shows where several positions are really one bet. Built from values already recorded daily — no extra data is fetched. Descriptive only.</span></span></h2>
+        <div id="concentration"><p class="empty">Loading…</p></div>
+      </div>
+
+      <div id="sub-market" class="subtab-content" style="display:none">
+        <h2>How much of the market is participating <span class="info" tabindex="0">i<span class="tooltip">The share of US stocks trading above their own 200-day and 50-day averages. A rise carried by most stocks is a different environment from one carried by a few — breakout setups fail more often in the second. Third-party public data, fetched once a day.</span></span></h2>
+        <div id="breadth"><p class="empty">Loading…</p></div>
+      </div>
     </div>
 
   </div>
