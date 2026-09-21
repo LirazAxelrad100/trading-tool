@@ -1,3 +1,4 @@
+import copy
 import json
 import shutil
 import tempfile
@@ -144,6 +145,47 @@ def record_portfolio_snapshot(holdings: list[dict]) -> None:
     points = [p for p in load_portfolio_history() if p["date"] != today]
     points.append({"date": today, "value": total})
     save_portfolio_history(points)
+
+
+# A bulk refresh reads the whole list, spends 30-60 seconds on the network (one fetch per
+# ticker plus a 1s pause between them, for Finnhub's rate limit), and only then writes the
+# list back. Anything the user did during that window was written to the file and then
+# overwritten by the snapshot the refresh had been holding since before they did it —
+# FastAPI runs these sync handlers in a threadpool, so the requests really do overlap.
+#
+# Real incident (21.09.2026): SNDK was removed from the watch list mid-refresh. The delete
+# archived it and saved the list without it; the refresh then saved its own older copy,
+# which still had SNDK — with a freshly fetched price. It came back, the user removed it
+# again, and the archive ended up with two records of one decision, the first carrying the
+# stale 13.09 price and the second today's. The duplicate was the visible symptom; the
+# same race silently discards a note written during a refresh, and on holdings it would
+# undo a sale.
+#
+# So a bulk refresh no longer writes what it read. It re-reads the file at the end and
+# replays only the fields it actually changed. Diffing rather than listing those fields by
+# name is deliberate: apply_quote, apply_ls_tc_price and update_consensus between them
+# touch anchors, prices and consensus keys, and a hand-maintained list would rot the next
+# time one of them learns a new field.
+def replay_refresh_changes(before: list[dict], after: list[dict], fresh: list[dict]) -> list[dict]:
+    """Apply what a refresh changed onto the current file contents, keyed by id.
+
+    A record the refresh never saw (added meanwhile) is left alone; one that has since been
+    deleted or sold stays gone rather than being resurrected by the snapshot."""
+    old_by_id = {r["id"]: r for r in before}
+    new_by_id = {r["id"]: r for r in after}
+    for record in fresh:
+        old = old_by_id.get(record["id"])
+        new = new_by_id.get(record["id"])
+        if old is None or new is None:
+            continue
+        for key in set(old) | set(new):
+            if old.get(key) == new.get(key):
+                continue
+            if key in new:
+                record[key] = new[key]
+            else:
+                record.pop(key, None)
+    return fresh
 
 
 def load_holdings_history() -> list[dict]:
@@ -806,6 +848,7 @@ def refresh_watchlist_item(item_id: str):
 @app.post("/api/watchlist/refresh-all")
 def refresh_all_watchlist():
     items = load_watchlist()
+    before = copy.deepcopy(items)
     try:
         rate = prices.fetch_usd_to_eur_rate()
     except PriceError as e:
@@ -820,6 +863,9 @@ def refresh_all_watchlist():
         if i < len(items) - 1:
             time.sleep(1)
 
+    # Replay onto the file as it is now, not as it was a minute ago — see
+    # replay_refresh_changes. A ticker removed during this loop stays removed.
+    items = replay_refresh_changes(before, items, load_watchlist())
     save_watchlist(items)
     record_watchlist_snapshot(items)  # builds a free price series for candidate comparisons
     return {"items": items, "errors": errors}
@@ -1058,6 +1104,7 @@ def refresh_holding_price(holding_id: str, override_price_check: bool = False):
 @app.post("/api/holdings/refresh-all")
 def refresh_all_prices():
     holdings = load_holdings()
+    before = copy.deepcopy(holdings)
     weekend = prices.is_weekend()
     rate = None
     if not weekend:
@@ -1118,6 +1165,9 @@ def refresh_all_prices():
         apply_quote(holding, quote, rate)
         results.append(evaluate_trailing(holding, holding["current_price"]))
 
+    # Replay onto the file as it is now — a sale or a lot edit made during this loop must
+    # not be undone by the snapshot taken before it. See replay_refresh_changes.
+    holdings = replay_refresh_changes(before, holdings, load_holdings())
     save_holdings(holdings)
     record_portfolio_snapshot(holdings)  # one portfolio-value point per day
     record_holdings_snapshot(holdings)  # one per-holding value point per day
