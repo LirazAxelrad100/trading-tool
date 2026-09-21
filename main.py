@@ -616,6 +616,28 @@ def save_watch_archive(entries: list[dict]) -> None:
     WATCH_ARCHIVE_FILE.write_text(json.dumps(entries, indent=2))
 
 
+# The archive keeps two prices and nothing else numeric, so the pair has to be right — it is
+# the whole answer to "was I right to pass on this". Taking the stored current_price was wrong
+# for a ticker that had not been refreshed since it was added: SNDK sat on the list for eight
+# days without a refresh, so its stored price was still the price at add, and the archive
+# reported the change while watched as 0,0% when it was really +11,8%. A frozen number is only
+# worth freezing at the moment it is taken, so take it here.
+#
+# One quote plus the FX rate; a failure falls back to the stored price and says so rather than
+# blocking the removal — the note is the point of the record, and losing it to a network blip
+# would be the worse trade. Skipped on weekends for the same reason every other price fetch is:
+# no exchange is open, so there is nothing real to fetch (prices.is_weekend()).
+def _price_for_archive(item: dict) -> tuple:
+    """(price, stale) — a live EUR price, or the stored one flagged as not taken just now."""
+    if prices.is_weekend():
+        return item.get("current_price"), True
+    try:
+        rate = prices.fetch_usd_to_eur_rate()
+        return prices.fetch_quote_shape(item["ticker"])["close"] * rate, False
+    except PriceError:
+        return item.get("current_price"), True
+
+
 def archive_watch_item(item: dict, outcome: str) -> dict:
     """Keep what you worked out, drop what goes stale.
 
@@ -631,6 +653,7 @@ def archive_watch_item(item: dict, outcome: str) -> dict:
             status_code=422,
             detail=f"Outcome must be one of {', '.join(WATCH_ARCHIVE_OUTCOMES)}.",
         )
+    price_at_remove, stale = _price_for_archive(item)
     entry = {
         "id": str(uuid.uuid4()),
         "ticker": item["ticker"],
@@ -640,8 +663,12 @@ def archive_watch_item(item: dict, outcome: str) -> dict:
         "why": item.get("why") or "",
         "source_url": item.get("source_url") or "",
         "price_at_add": item.get("price_at_add"),
-        "price_at_remove": item.get("current_price"),
+        "price_at_remove": price_at_remove,
     }
+    # Only written when the pair cannot be trusted, so the ordinary entry stays clean and the
+    # UI can mark the exception rather than hedging every row.
+    if stale:
+        entry["price_at_remove_stale"] = item.get("last_refreshed") or True
     entries = load_watch_archive()
     entries.append(entry)
     save_watch_archive(entries)

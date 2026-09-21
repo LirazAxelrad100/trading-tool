@@ -322,10 +322,10 @@ td.nowrap { white-space: nowrap; }
 .checklist-context { margin: 0.2rem 0 0; padding-left: 1.1rem; line-height: 1.55; }
 .checklist-context li { margin-bottom: 0.3rem; }
 
-/* The archive's Why holds a paragraph, not a cell's worth of text. Capped and wrapped
-   so one long note cannot stretch the table past the window. */
+/* The archive's Why is a one-line preview that opens the modal, matching the live watch rows —
+   the full notes run to thousands of characters and printing them turned the panel into a wall. */
 .archive-why {
-  max-width: 34rem;
+  max-width: 22rem;
   white-space: normal;
   overflow-wrap: anywhere;
 }

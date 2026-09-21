@@ -2115,19 +2115,45 @@ const ARCHIVE_OUTCOMES = {
   mistake: { label: "Mistake", cls: "subtitle" },
 };
 
+let watchArchive = [];
+
+// The note is the whole reason the archive exists, and printing it in full was what made the
+// panel unusable: these run to thousands of characters, so a handful of removed tickers pushed
+// a wall of prose under the watch list. Same fix as the live rows — the cell shows the opening
+// line and the modal holds the rest.
+function archiveNotePreview(e) {
+  const text = (e.why || "").trim();
+  if (!text) return "—";
+  const first = text.split("\n").find((l) => l.trim()) || "";
+  const label = first.length > 90 ? first.slice(0, 90) + "…" : first;
+  return `<button class="watch-note-preview" onclick="openThesisModal('${e.id}', 'archive')" title="Click to read the whole note">${escapeHtml(label)}</button>`;
+}
+
 async function loadWatchArchive() {
   const host = document.getElementById("watch-archive");
   if (!host) return;
   const res = await fetch("/api/watchlist/archive");
   const entries = (await res.json()) || [];
+  watchArchive = entries;
   if (!entries.length) {
     host.innerHTML = "";
     return;
   }
 
+  // The price at removal is fetched at the moment of removal, so this pair normally means
+  // exactly what it says. When that fetch couldn't happen (a weekend, or the network was
+  // down) the stored price was used instead, and the figure is marked rather than printed
+  // plain — an unrefreshed ticker's stored price is its price at add, which would render a
+  // real move as a confident 0,0%.
   const since = (e) => {
     if (e.price_at_add == null || e.price_at_remove == null) return "—";
-    return coloredPct(((e.price_at_remove / e.price_at_add) - 1) * 100);
+    const pct = coloredPct(((e.price_at_remove / e.price_at_add) - 1) * 100);
+    if (!e.price_at_remove_stale) return pct;
+    const when =
+      typeof e.price_at_remove_stale === "string"
+        ? `last refreshed ${fmtDate(e.price_at_remove_stale.slice(0, 10))}`
+        : "never refreshed";
+    return `${pct} <span class="subtitle" title="No live price could be taken when this was removed (${when}), so this uses the last one stored — the real change may be larger.">?</span>`;
   };
 
   const rows = [...entries]
@@ -2143,7 +2169,7 @@ async function loadWatchArchive() {
         <td>${fmtDate(e.added_date)}</td>
         <td>${fmtDate(e.removed_date)}</td>
         <td>${since(e)}</td>
-        <td class="archive-why">${escapeHtml(e.why || "—")}${link}</td>
+        <td class="archive-why">${archiveNotePreview(e)}${link}</td>
         <td><button class="danger" onclick="deleteArchiveEntry('${e.id}')">Delete</button></td>
       </tr>`;
     })
@@ -2615,20 +2641,43 @@ let thesisHoldingId = null;
 // than reading order: the row preview shows the opening line, so with oldest-first the preview
 // showed the oldest thinking forever — TSM's preview would have read "zacks report #ai bubble"
 // from 09.08, five entries later.
-let thesisTarget = null; // {kind: "holding" | "watch", id}
+let thesisTarget = null; // {kind: "holding" | "watch" | "archive", id}
 
 function thesisRecord(target) {
-  return target.kind === "watch"
-    ? watchlist.find((x) => x.id === target.id)
-    : lastHoldings.find((x) => x.id === target.id);
+  if (target.kind === "watch") return watchlist.find((x) => x.id === target.id);
+  if (target.kind === "archive") return watchArchive.find((x) => x.id === target.id);
+  return lastHoldings.find((x) => x.id === target.id);
 }
+
+// Each list gets its own title and its own opening line. The intro used to be a fixed string
+// about owning a stock, which was already slightly wrong on a watch item and would be plainly
+// wrong on an archived one — that note is finished, and telling her to write it is nonsense.
+const THESIS_COPY = {
+  holding: {
+    title: "why you own it",
+    intro:
+      "Why you own this, and what would tell you the reasoning stopped holding. A year from now the numbers will still be here — this won't be, unless you write it.",
+  },
+  watch: {
+    title: "why you're watching it",
+    intro:
+      "Why this is worth watching, and what would tell you the reasoning stopped holding. A year from now the numbers will still be here — this won't be, unless you write it.",
+  },
+  archive: {
+    title: "what you wrote while watching it",
+    intro:
+      "Kept from when this was on your watch list. Read-only: an archived note is a record of what you thought at the time, so it stops changing when the ticker leaves the list.",
+  },
+};
 
 function openThesisModal(id, kind = "holding") {
   thesisTarget = { kind, id };
   const r = thesisRecord(thesisTarget);
   if (!r) return;
-  document.getElementById("thesis-modal-title").textContent =
-    `${r.ticker} — ${kind === "watch" ? "why you're watching it" : "why you own it"}`;
+  const copy = THESIS_COPY[kind] || THESIS_COPY.holding;
+  document.getElementById("thesis-modal-title").textContent = `${r.ticker} — ${copy.title}`;
+  document.getElementById("thesis-intro").textContent = copy.intro;
+  document.getElementById("thesis-read-actions").style.display = kind === "archive" ? "none" : "";
   document.getElementById("thesis-url").value = r.source_url || "";
   renderThesisRead(r);
   thesisShowRead();
