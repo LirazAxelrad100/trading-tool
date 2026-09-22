@@ -907,7 +907,7 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
     # What selling would actually add to this year's tax, not the gain taxed on its own.
     # Realised losses already sit in the Verlustverrechnungstopf and offset it — quoting the
     # standalone 26,375% against a gain the year's losses already cover is an argument not to
-    # sell that isn't true (2026: €[redacted] of losses banked against €[redacted] of gains).
+    # sell that isn't true, whenever the year's banked losses cover the gain.
     estimated_tax = tax.tax_on_next_gain(
         load_sales_history(), str(date.today().year), total_gain
     )["extra_tax"]
@@ -1335,7 +1335,7 @@ def refresh_opportunities_b():
 def get_sales_summary(year: Optional[str] = None):
     """What is actually owed for the year, losses netted off — see tax.py. The per-sale
     figure each row carries is the gain taxed on its own, which is not how German
-    capital-gains tax works and overstated 2026 by €[redacted] against a real net loss."""
+    capital-gains tax works and showed tax owed in a year that was a net loss."""
     sales = load_sales_history()
     target = year or (tax.years(sales) or [str(date.today().year)])[0]
     return tax.year_summary(sales, target)

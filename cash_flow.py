@@ -3,7 +3,7 @@
 `portfolio_history.json` records what the holdings are worth each day. A deposit raises
 that number without a single price moving, and a withdrawal lowers it — so the chart shows
 a step you caused and reads it as a gain. Real case (2026-09-16): the line jumped 6,08% on
-a day the portfolio actually rose 1,41%, because €[redacted] of new cash arrived and bought DELL.
+a day the portfolio actually rose 1,41%, because new cash arrived that morning and bought DELL.
 This is the same fault `concentration.py` guards against with `_changed_dates()`, one level
 up: a value that changes for a reason other than price.
 
@@ -18,7 +18,7 @@ from records the tool already keeps:
 - money received selling = each sale's `total_sum` on its sell date.
 
 **The net is what matters, not the gross.** Four of the six flow days in the first real run
-were same-day rotations — MU sold for €[redacted] and FIX bought for €[redacted] on 11.08 — where the
+were same-day rotations — one position sold and another bought for almost the same sum — where the
 chart was never wrong, because no money entered or left. Marking those would have pointed at
 three days that needed no explaining and buried the three that did.
 
@@ -31,7 +31,7 @@ import collections
 from typing import Optional
 
 # Below this, a "flow" is rounding noise or a fractional-share remainder, not something the
-# user did. Rotations land here too: sell €[redacted], buy €[redacted], net €11 — the chart was right
+# user did. Rotations land here too: sell 3.999, buy 4.010, net 11 — the chart was right
 # that day, so marking it would add a label with nothing to say.
 MATERIAL_EUR = 100.0
 
@@ -98,8 +98,8 @@ def overlay(points: list, holdings: list, sales: list) -> list:
 def total_return_pct(points: list, holdings: list, sales: list) -> Optional[float]:
     """The return the holdings actually produced over the recorded period: each day's move
     with that day's money movement removed, chained together. The chart header used to show
-    (last - first) / first, which counts every deposit as a gain — on a €[redacted] portfolio
-    holding €[redacted] of cash that arrived today, that is not a rounding error."""
+    (last - first) / first, which counts every deposit as a gain. On a real portfolio a single
+    day's deposit can be several percent of the total, so that is not a rounding error."""
     if not points or len(points) < 2:
         return None
     flows = by_date(holdings, sales)

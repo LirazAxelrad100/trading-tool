@@ -8,8 +8,8 @@ tax if we have lose"*.
 Losses from share sales go into the **Verlustverrechnungstopf** and offset gains from other
 share sales in the same year; Trade Republic nets them at source and refunds tax it already
 withheld. Only the net is taxable. The gap is not academic: on 2026-09-17 the History tab's
-per-row column summed to **€[redacted] of tax** while the real position for the year was a **net
-loss of €[redacted]** — nothing owed, and €[redacted] carried forward against future gains. Acting on
+per-row column summed to several hundred euros of supposedly-owed tax while the real position
+for the year was a **net loss** — nothing owed, and the loss carried forward. Acting on
 the per-row number would have meant believing a tax bill that does not exist, and treating
 every realised loss as if it were worth nothing.
 
@@ -78,8 +78,8 @@ def years(sales: list) -> list:
 def tax_on_next_gain(sales: list, year: str, gain: float) -> dict:
     """What one more sale would actually add to the year's tax — the question the sell
     preview is really asking. It used to answer `max(0, gain) * rate`, which ignores every
-    loss already banked: with €[redacted] of realised losses sitting in the pot, a €[redacted] gain
-    adds nothing, and quoting €[redacted] of tax against it is an argument not to sell that is
+    loss already banked: when realised losses in the pot exceed the gain being considered,
+    the sale adds nothing, and quoting the standalone rate is an argument not to sell that is
     simply untrue."""
     before = year_summary(sales, year)
     after = year_summary(sales + [{"sell_datetime": f"{year}-01-01", "realized_gain": gain}], year)

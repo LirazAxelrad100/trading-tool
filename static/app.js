@@ -3045,7 +3045,7 @@ function fmtSellDatetime(s) {
 
 // German capital-gains tax nets losses against gains within the year, so a per-sale figure
 // is not an estimate of anything — it is the gain taxed as if no loss had happened. The
-// column that did that summed to €[redacted] of tax against a real net loss of €[redacted].
+// column that did that showed hundreds of euros of tax in a year that was a net loss.
 function renderSalesSummary(s) {
   const box = document.getElementById("sales-summary");
   if (!box) return;
