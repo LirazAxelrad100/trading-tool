@@ -10,3 +10,8 @@ __pycache__/
 data/*
 !data/*.example.json
 !data/sp500.json
+
+# Claude's project context. Untracked since 22.09.2026: the repo is public, and this
+# file accumulates real portfolio figures as a matter of course, so keeping it out is a
+# fix rather than a rule to remember. Backed up by backup_data.py.
+CLAUDE.md
