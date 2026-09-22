@@ -31,7 +31,7 @@ import collections
 from typing import Optional
 
 # Below this, a "flow" is rounding noise or a fractional-share remainder, not something the
-# user did. Rotations land here too: sell 3.999, buy 4.010, net 11 — the chart was right
+# user did. Rotations land here too: sell 4.000, buy 4.050, net 50 — the chart was right
 # that day, so marking it would add a label with nothing to say.
 MATERIAL_EUR = 100.0
 
