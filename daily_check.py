@@ -1,3 +1,4 @@
+import copy
 import time
 from datetime import date
 
@@ -82,39 +83,74 @@ def format_error(result: dict) -> str:
     return f"{result['ticker']}: ERROR — {result['error']}"
 
 
+def price_holding(holding: dict, get_rate) -> None:
+    """Same order as the web app's refresh_all_prices(): Lang & Schwarz first, Finnhub as
+    the fallback.
+
+    This check used to go straight to Finnhub for every holding. It runs at 08:00 CET, when
+    the US market is shut, and apply_quote() only rolls a price forward while it is open —
+    so every morning the stops were compared against whatever price the last manual refresh
+    had stored, not a live one. The email could say "no stop hit" about a stock that had
+    fallen through its stop overnight. Lang & Schwarz trades from about 07:30 CET and is the
+    venue Trade Republic actually uses, so for any holding with an ISIN the 08:00 price is
+    real. Raises PriceError if nothing could be fetched."""
+    if main.apply_ls_tc_price(holding):
+        return
+    rate = get_rate()
+    main.apply_quote(holding, prices.fetch_quote(holding["ticker"], rate), rate)
+
+
 def run() -> None:
     holdings = main.load_holdings()
-    try:
-        rate = fetch_rate_with_retry()
-    except prices.PriceError as e:
-        send_email_with_retry(
-            "Trading tool: daily check failed",
-            f"Could not fetch USD/EUR rate: {e}",
-        )
-        print(f"Failed: {e}")
-        return
+    before = copy.deepcopy(holdings)
+    weekend = prices.is_weekend()
+
+    # The exchange rate is only needed for the Finnhub fallback, so it is fetched on first
+    # use rather than up front. It used to be fetched first and abort the whole check on
+    # failure — which, with holdings priced from Lang & Schwarz in EUR, would throw away a
+    # check that did not need it. A failure now marks only the holdings that did.
+    # The failure is remembered too: each attempt already retries for about a minute, and
+    # paying that again for every remaining holding would stretch one outage into many.
+    rate_cache = {}
+
+    def get_rate() -> float:
+        if "error" in rate_cache:
+            raise rate_cache["error"]
+        if "rate" not in rate_cache:
+            try:
+                rate_cache["rate"] = fetch_rate_with_retry()
+            except prices.PriceError as e:
+                rate_cache["error"] = prices.PriceError(f"could not fetch USD/EUR rate: {e}")
+                raise rate_cache["error"]
+        return rate_cache["rate"]
 
     breakouts = []
     stop_hits = []
     errors = []
 
     for holding in holdings:
-        try:
-            quote = prices.fetch_quote(holding["ticker"], rate)
-        except prices.PriceError as e:
-            # Manual-price holdings (e.g. an EU-listed ordinary share vs. its US
-            # ADR) commonly have no live feed at all — that's not an error, just
-            # keep the price frozen. A real ticker failing to fetch still counts.
-            if not holding.get("manual_price"):
-                errors.append({"ticker": holding["ticker"], "error": str(e)})
-            continue
-        main.apply_quote(holding, quote, rate)
+        # No exchange is open at weekends, so there is nothing real to fetch — the same
+        # rule as the web refresh (prices.is_weekend()). The stops are still checked
+        # against the stored price.
+        if not weekend:
+            try:
+                price_holding(holding, get_rate)
+            except prices.PriceError as e:
+                # Manual-price holdings (e.g. an EU-listed ordinary share vs. its US
+                # ADR) commonly have no live feed at all — that's not an error, just
+                # keep the price frozen. A real ticker failing to fetch still counts.
+                if not holding.get("manual_price"):
+                    errors.append({"ticker": holding["ticker"], "error": str(e)})
+                continue
         result = main.evaluate_trailing(holding, holding["current_price"])
         if result["stop_hit"]:
             stop_hits.append(result)
         elif result["triggered"]:
             breakouts.append(result)
 
+    # Write back only what this run changed, onto the file as it is now — the web app may
+    # have saved a sale or an edit while the fetches ran. See main.replay_refresh_changes.
+    holdings = main.replay_refresh_changes(before, holdings, main.load_holdings())
     main.save_holdings(holdings)
     main.record_portfolio_snapshot(holdings)  # daily portfolio-value point for the chart
     main.record_holdings_snapshot(holdings)  # daily per-holding value point for the weekly table
