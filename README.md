@@ -2,6 +2,12 @@
 
 Local tool for tracking holdings, manually-simulated trailing stops (Trade Republic / Scalable Capital don't support native ones), and the reasoning behind each position. Built for one user's real portfolio — it surfaces facts and never tells you what to buy or sell. Data stays on this machine only.
 
+![The five tabs, and the form for adding a holding](docs/screenshots/menu.webp)
+
+![The Watch List: candidates grouped by #tags, each group read as still working or unwinding, with the reasoning for each ticker alongside its numbers](docs/screenshots/watchlist.webp)
+
+![Profits vs. price: whether each company's profit grew, what people now pay for each euro of it, and what analysts expect next](docs/screenshots/profits-vs-price.webp)
+
 ## Setup
 
 ```bash
