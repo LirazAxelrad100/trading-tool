@@ -2464,9 +2464,57 @@ function openRiskModal(id) {
   document.getElementById("risk-why").value = w.why || "";
   document.getElementById("risk-tradeoff").value = w.tradeoff || "";
   document.getElementById("risk-drawdown").value = w.drawdown || "";
+  riskStops = null;
   renderRiskPreview();
   renderRiskContext();
+  loadRiskStops(false);
   document.getElementById("risk-modal").style.display = "flex";
+}
+
+// How often a trailing stop of each width would have sold this stock recently. Came out of
+// HPE (2026-08): a default 10% stop fired five days after buying, on a stock whose ordinary
+// week moves about that much. Shown next to the stop field so the width is chosen knowing how
+// this stock behaves — a description, not a suggested level.
+let riskStops = null;
+
+async function loadRiskStops(spend) {
+  const host = document.getElementById("risk-stops");
+  if (!host || !riskTicker) return;
+  const ticker = riskTicker.ticker;
+  if (spend) host.innerHTML = `<p class="subtitle">Checking…</p>`;
+  try {
+    const res = await fetch(`/api/risk/stops/${ticker}${spend ? "" : "?cached_only=true"}`);
+    const d = await res.json();
+    if (!riskTicker || riskTicker.ticker !== ticker) return;
+    if (!res.ok || d.error) {
+      host.innerHTML = `<p class="subtitle">Couldn't check how it swings: ${escapeHtml(d.detail || d.error)}</p>`;
+      return;
+    }
+    riskStops = d.cached ? d : null;
+    renderRiskStops();
+  } catch (e) {
+    host.innerHTML = `<p class="subtitle">Couldn't check how it swings: ${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
+function renderRiskStops() {
+  const host = document.getElementById("risk-stops");
+  if (!host || !riskTicker) return;
+  if (!riskStops) {
+    host.innerHTML = `<p class="subtitle">How often would a stop have sold this recently? <button class="secondary" onclick="loadRiskStops(true)">Check</button> uses one Alpha Vantage call the first time each day</p>`;
+    return;
+  }
+  const typed = parseEuNumber(document.getElementById("risk-stop").value);
+  const times = (n) => (n === 0 ? "never" : n === 1 ? "once" : `${n} times`);
+  const parts = Object.entries(riskStops.fires).map(([w, n]) => {
+    const text = `${w}% — ${times(n)}`;
+    return Number(w) === typed ? `<strong>${text}</strong>` : text;
+  });
+  host.innerHTML = `<p>${riskTicker.ticker} moves about <strong>${fmtPct(
+    riskStops.typical_daily_move_pct / 100
+  )}</strong> on a typical day. Over the last ${riskStops.days} trading days, a stop following the price up would have sold you out: ${parts.join(
+    " · "
+  )}.</p><p class="subtitle">Counted on each day's low, since a stop order fires during the day. How it has swung, not how it will.</p>`;
 }
 
 function closeRiskModal() {
@@ -2477,6 +2525,7 @@ function closeRiskModal() {
 function renderRiskPreview() {
   const out = document.getElementById("risk-output");
   if (!riskTicker) return;
+  if (riskStops) renderRiskStops();
   const amount = parseEuNumber(document.getElementById("risk-amount").value);
   const stopPct = parseEuNumber(document.getElementById("risk-stop").value);
   if (isNaN(amount) || amount <= 0 || isNaN(stopPct) || stopPct <= 0 || stopPct >= 100) {
@@ -2591,6 +2640,8 @@ async function checkOverlap() {
     ]);
     const d = await res.json();
     const pos = await posRes.json();
+    // Same cached price history, so the stop count is free once this has run.
+    if (!riskStops) loadRiskStops(false);
     if (!res.ok || d.error) {
       slot.innerHTML = `<span class="subtitle">Couldn't check: ${d.detail || d.error}</span>`;
       return;

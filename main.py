@@ -24,6 +24,7 @@ import momentum
 import opportunities_b
 import tax
 import prices
+import risk
 import sectors
 import synthesis
 import zacks_import
@@ -1388,6 +1389,16 @@ def get_breadth_position(ticker: str):
     cache with the overlap check, so asking for both costs one call, not two."""
     try:
         return breadth.stock_position(ticker)
+    except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/risk/stops/{ticker}")
+def get_stop_history(ticker: str, cached_only: bool = False):
+    """How often trailing stops of 10/15/20/25% would have fired recently. cached_only lets
+    the pre-buy modal show it on open without spending an Alpha Vantage call."""
+    try:
+        return risk.stop_history(ticker.upper(), cached_only=cached_only)
     except AlphaVantageError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
