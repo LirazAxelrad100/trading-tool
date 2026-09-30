@@ -124,6 +124,10 @@ button.danger { background: var(--rust); }
 }
 .stop-hit .line { margin: 0.15rem 0; font-size: 0.88rem; }
 .stop-hit .actions { margin-top: 0.6rem; display: flex; gap: 0.5rem; }
+.stop-hit .questions-label { margin-top: 0.6rem; }
+.stop-hit .stop-questions { margin: 0.2rem 0 0; padding-left: 1.3rem; font-size: 0.88rem; }
+.stop-hit .stop-questions li { margin: 0.15rem 0; }
+.stop-hit .stop-questions a { color: var(--accent); }
 
 .no-trigger { color: var(--text); font-size: 0.85rem; }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; }

@@ -1480,6 +1480,22 @@ function growthLine(result) {
   return line;
 }
 
+// The stop-hit panel's "is this a normal swing?" question, answered with the stock's typical
+// daily move so a 0,1% breach can be read against it. Spends one Alpha Vantage call the first
+// time a ticker is checked each day (cached after), which is fine for a panel this rare.
+async function fillStopSwing(id, ticker) {
+  const slot = document.getElementById(`swing-${id}`);
+  if (!slot) return;
+  try {
+    const res = await fetch(`/api/risk/stops/${ticker}`);
+    const d = await res.json();
+    if (!res.ok || d.error || d.typical_daily_move_pct == null) throw new Error();
+    slot.textContent = `(it moves about ${fmtPct(d.typical_daily_move_pct / 100)} on a typical day)`;
+  } catch (e) {
+    slot.textContent = "(couldn't check its swings right now)";
+  }
+}
+
 function renderFlag(id, result) {
   const flagsDiv = document.getElementById("flags");
   const existing = document.getElementById(`flag-${id}`);
@@ -1510,6 +1526,8 @@ function renderFlag(id, result) {
 
   if (result.stop_hit) {
     const gainWord = result.total_gain >= 0 ? "gain" : "loss";
+    const holding = (lastHoldings || []).find((h) => h.id === id);
+    const hasWhy = !!(holding && holding.why && holding.why.trim());
     let consensusLine = "";
     if (result.analyst_consensus) {
       const c = result.analyst_consensus;
@@ -1520,17 +1538,29 @@ function renderFlag(id, result) {
     stopFlag.className = "panel stop-hit";
     stopFlag.innerHTML = `
       <div class="line"><strong>${result.ticker}</strong> — at or below Stop loss</div>
-      <div class="line">Current price: ${fmt(result.new_price)} · Stop loss: ${fmt(result.current_stop)}</div>
-      <div class="line">Your exit plan: <strong>${result.exit_plan_label}</strong></div>
+      <div class="line">Current price: ${fmt(result.new_price)} · Stop loss: ${fmt(result.current_stop)} · ${
+        result.pct_above_stop < 0
+          ? `<span class="price-down">${fmtPct(Math.abs(result.pct_above_stop))} below the stop</span>`
+          : "exactly at the stop"
+      }</div>
       <div class="line">Estimated ${gainWord}: ${fmt(result.total_gain)} · Estimated tax (26,375%): ${fmt(result.estimated_tax)}</div>
-      ${result.growth_next_year_pct != null ? `<div class="line">Analysts expect profit to ${result.growth_next_year_pct >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(result.growth_next_year_pct) / 100)} next year.</div>` : ""}
+      ${result.growth_next_year_pct != null ? `<div class="line">Analysts expect profit to ${result.growth_next_year_pct >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(result.growth_next_year_pct) / 100)} next year${result.growth_as_of ? ` <span class="subtitle">(Zacks estimate as of ${fmtDate(result.growth_as_of)})</span>` : ""}.</div>` : ""}
       ${consensusLine}
+      <div class="line subtitle questions-label">Before acting:</div>
+      <ol class="stop-questions">
+        <li>Has the reason you bought it changed, or only the price? <a href="#" onclick="openThesisModal('${id}', 'holding'); return false;">${
+          hasWhy ? "Read your reasoning" : "No reasoning written yet — add it"
+        }</a></li>
+        <li>Is this a normal swing for this stock? <span id="swing-${id}" class="subtitle">(checking…)</span></li>
+        <li>If you had the cash today, would you buy it at this price?</li>
+      </ol>
       <div class="actions">
         <button class="secondary" onclick="resetTrailingStop('${id}', ${result.new_price}, ${result.reset_new_stop})">Reset trailing stop to current price</button>
         <button class="secondary" onclick="document.getElementById('flag-${id}').remove()">Dismiss</button>
       </div>
     `;
     flagsDiv.prepend(stopFlag);
+    fillStopSwing(id, result.ticker);
     return;
   }
 

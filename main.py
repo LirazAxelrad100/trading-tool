@@ -917,6 +917,7 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
     triggered = pct_move >= TRIGGER_THRESHOLD
     pct_above_stop = (current_price - stop_price) / stop_price
 
+    growth = zacks_import.overlay_growth(holding["ticker"])
     result = {
         "id": holding["id"],
         "ticker": holding["ticker"],
@@ -940,7 +941,8 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
         # from this result after a refresh, before the holdings list is necessarily reloaded.
         # None when the ticker is not in a Zacks Growth export yet — the line is dropped
         # rather than shown empty, since a stop status should stay short.
-        "growth_next_year_pct": zacks_import.overlay_growth(holding["ticker"]).get("growth_next_year_pct"),
+        "growth_next_year_pct": growth.get("growth_next_year_pct"),
+        "growth_as_of": growth.get("growth_as_of"),
     }
     if triggered:
         result["suggested_new_stop"] = current_price * (1 - holding["trailing_pct"])

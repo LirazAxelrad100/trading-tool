@@ -265,4 +265,7 @@ def overlay_growth(ticker: str) -> dict:
         "growth_next_year_pct": entry.get("growth_next_year_pct"),
         "growth_this_year_pct": entry.get("growth_this_year_pct"),
         "next_report_date": entry.get("next_report_date"),
+        # The day this estimate was exported. It only moves when the user exports again, so
+        # a screen that states it lets an old forecast read as old instead of as current.
+        "growth_as_of": (entry.get("imported_at") or "")[:10] or None,
     }
