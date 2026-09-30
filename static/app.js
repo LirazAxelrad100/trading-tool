@@ -945,6 +945,25 @@ function renderSectorContext(sc, stock3m) {
       <span class="subtitle">sector 3M ${fmtPct(sc.ret_3m)} · 1M ${fmtPct(sc.ret_1m)}.${verdict}</span>
     </div>`;
 }
+// A stock's typical daily move over the last month, 3 months and 5 months, side by side, so
+// "is it swinging more lately?" is visible — the single yearly figure blends all of it. The
+// trend clause only appears when the gap is large enough to mean something.
+const MOVE_WINDOW_LABELS = { "1m": "the last month", "3m": "3 months", "5m": "5 months" };
+
+function typicalMovesText(moves) {
+  if (!moves || !moves.length) return "";
+  const parts = moves.map((m) => `${fmtPct(m.pct / 100)} over ${MOVE_WINDOW_LABELS[m.window] || m.window}`);
+  const recent = moves.find((m) => m.window === "1m");
+  const longest = moves[moves.length - 1];
+  let trend = "";
+  if (recent && longest && recent !== longest) {
+    const ratio = recent.pct / longest.pct;
+    if (ratio >= 1.3) trend = " It has been swinging more lately.";
+    else if (ratio <= 0.75) trend = " It has been calmer lately.";
+  }
+  return `On a typical day it moves ${parts.join(" · ")}.${trend}`;
+}
+
 function renderRisk(v) {
   if (!v || v.error) {
     return `<div class="risk-badge"><strong>Volatility: —</strong> <span class="subtitle">${v && v.error ? v.error : "not enough price history"}</span></div>`;
@@ -953,7 +972,7 @@ function renderRisk(v) {
   return `
     <div class="risk-badge">
       <strong>Volatility: <span class="${cls}">${v.label}</span></strong>
-      <span class="subtitle">${fmtPct(v.annualized_pct / 100)} a year — based on how much the price has been swinging day to day over the last ${v.days_used} trading days, scaled up to a yearly figure so it's easier to compare across stocks. Looks backward only, not a prediction.</span>
+      <span class="subtitle">${fmtPct(v.annualized_pct / 100)} a year — how much the price has swung day to day over the last ${v.days_used} trading days, scaled to a yearly figure to compare across stocks. ${typicalMovesText(v.typical_moves)} Looks backward only, not a prediction.</span>
     </div>`;
 }
 
@@ -2540,9 +2559,10 @@ function renderRiskStops() {
     const text = `${w}% — ${times(n)}`;
     return Number(w) === typed ? `<strong>${text}</strong>` : text;
   });
-  host.innerHTML = `<p>${riskTicker.ticker} moves about <strong>${fmtPct(
-    riskStops.typical_daily_move_pct / 100
-  )}</strong> on a typical day. Over the last ${riskStops.days} trading days, a stop following the price up would have sold you out: ${parts.join(
+  const movesLine = riskStops.typical_moves
+    ? typicalMovesText(riskStops.typical_moves)
+    : `On a typical day it moves ${fmtPct(riskStops.typical_daily_move_pct / 100)}.`;
+  host.innerHTML = `<p>${movesLine} Over the last ${riskStops.days} trading days, a stop following the price up would have sold you out: ${parts.join(
     " · "
   )}.</p><p class="subtitle">Counted on each day's low, since a stop order fires during the day. How it has swung, not how it will.</p>`;
 }

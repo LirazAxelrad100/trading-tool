@@ -12,13 +12,33 @@ VOL_BANDS = [
 ]
 
 
+# Windows for the typical daily move, in trading days. Stops at ~5 months because Alpha
+# Vantage's free tier returns 100 trading days; 6 months would need the paid `full` output.
+MOVE_WINDOWS = [("1m", 21), ("3m", 63), ("5m", 100)]
+
+
+def typical_moves(closes: list) -> list:
+    """The median absolute daily move over each window, newest days last. Median rather than
+    average, so one earnings-day jump doesn't set the figure for a whole month. Side by side
+    they show whether a stock is swinging more or less lately than it used to — which the
+    single annualized figure blends into one number."""
+    out = []
+    for key, n in MOVE_WINDOWS:
+        window = closes[-(n + 1):]
+        if len(window) < n * 0.8:
+            continue
+        moves = sorted(abs(window[i] / window[i - 1] - 1) * 100 for i in range(1, len(window)))
+        out.append({"window": key, "days": len(moves), "pct": moves[len(moves) // 2]})
+    return out
+
+
 def compute_volatility(ticker: str, days: int = 90) -> dict:
     """Historical (realized) volatility from daily closes — how much the price has
     actually swung day to day, annualized. Purely descriptive, backward-looking:
     not a forecast of future moves. Reuses alpha_vantage's per-ticker-per-day price
     cache, so it costs nothing extra if the ticker's chart was already viewed today."""
-    prices = alpha_vantage.fetch_daily_prices(ticker, days=days)
-    closes = [p["close"] for p in prices]
+    all_closes = [p["close"] for p in alpha_vantage.fetch_daily_prices(ticker, days=100)]
+    closes = all_closes[-days:]
     if len(closes) < 10:
         return {"error": "Not enough price history to estimate volatility."}
 
@@ -31,6 +51,7 @@ def compute_volatility(ticker: str, days: int = 90) -> dict:
         "annualized_pct": annualized_pct,
         "label": label,
         "days_used": len(closes),
+        "typical_moves": typical_moves(all_closes),
     }
 
 
@@ -77,5 +98,6 @@ def stop_history(ticker: str, cached_only: bool = False) -> dict:
         "cached": True,
         "days": len(closes),
         "typical_daily_move_pct": moves[len(moves) // 2],
+        "typical_moves": typical_moves(closes),
         "fires": fires,
     }
