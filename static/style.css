@@ -128,6 +128,7 @@ button.danger { background: var(--rust); }
 .stop-hit .stop-questions { margin: 0.2rem 0 0; padding-left: 1.3rem; font-size: 0.88rem; }
 .stop-hit .stop-questions li { margin: 0.15rem 0; }
 .stop-hit .stop-questions a { color: var(--accent); }
+.promotion-nudge { margin-top: 0.4rem; font-weight: 600; }
 
 .no-trigger { color: var(--text); font-size: 0.85rem; }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; }

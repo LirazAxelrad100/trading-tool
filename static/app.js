@@ -1449,7 +1449,41 @@ function setPendingPromotion(p) {
   if (p) {
     banner.innerHTML = `Buying <strong>${escapeHtml(p.ticker)}</strong> from your watch list — its note ${
       p.why ? "will be copied onto the holding" : "is empty, so nothing will be copied"
-    }, and the watch-list entry will be removed once you add it. <span class="lots-link" onclick="setPendingPromotion(null)">cancel</span>`;
+    }, and the watch-list entry will be removed once you add it. <span class="lots-link" onclick="setPendingPromotion(null)">cancel</span>${riskNudge(
+      p
+    )}`;
+  }
+}
+
+// A habit nudge, not a gate: the Risk modal holds the numbers worth seeing before a buy (what
+// a stop-out costs, how often a stop would have fired — INOD's 10% stop fired 16 times in 100
+// days), and it only helps if it is opened. Silent when it was looked at in the last week;
+// older than that the price and swings have moved on, so it asks again.
+const RISK_FRESH_DAYS = 7;
+
+function riskNudge(p) {
+  const seen = p.riskViewedAt;
+  if (seen && (Date.now() - new Date(`${seen}T00:00:00`).getTime()) / 86400000 < RISK_FRESH_DAYS) return "";
+  const lead = seen
+    ? `You last looked at ${escapeHtml(p.ticker)}'s risk on ${fmtDate(seen)}.`
+    : `You haven't looked at ${escapeHtml(p.ticker)}'s risk yet.`;
+  return `<div class="promotion-nudge">${lead} <span class="lots-link" onclick="openRiskModal('${p.watchId}')">Look now</span></div>`;
+}
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function markRiskViewed(w) {
+  w.risk_viewed_at = localToday();
+  if (pendingPromotion && pendingPromotion.watchId === w.id) {
+    setPendingPromotion({ ...pendingPromotion, riskViewedAt: w.risk_viewed_at });
+  }
+  try {
+    await fetch(`/api/watchlist/${w.id}/risk-viewed`, { method: "POST" });
+  } catch (e) {
+    // Not worth interrupting the modal over — at worst the nudge asks again next time.
   }
 }
 
@@ -1465,11 +1499,19 @@ function promoteWatchItem(id) {
   ]
     .filter((s) => (s || "").trim())
     .join("\n");
-  setPendingPromotion({ watchId: w.id, ticker: w.ticker, why, source_url: w.source_url });
+  setPendingPromotion({
+    watchId: w.id,
+    ticker: w.ticker,
+    why,
+    source_url: w.source_url,
+    riskViewedAt: w.risk_viewed_at,
+  });
   showTab("stocks");
   const field = document.getElementById("f-ticker");
   field.value = w.ticker;
-  document.getElementById("f-date").value = new Date().toISOString().slice(0, 10);
+  // Local date, not toISOString(): between midnight and 02:00 in Berlin the UTC date is
+  // still yesterday — the same bug that once shifted the weekly table.
+  document.getElementById("f-date").value = localToday();
   field.scrollIntoView({ block: "center" });
   document.getElementById("f-shares").focus();
 }
@@ -2518,6 +2560,7 @@ function openRiskModal(id) {
   renderRiskContext();
   loadRiskStops(false);
   document.getElementById("risk-modal").style.display = "flex";
+  markRiskViewed(w);
 }
 
 // How often a trailing stop of each width would have sold this stock recently. Came out of

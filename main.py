@@ -860,6 +860,17 @@ def update_watchlist_meta(item_id: str, body: WatchlistMetaIn):
     return watch_item
 
 
+@app.post("/api/watchlist/{item_id}/risk-viewed")
+def mark_watch_risk_viewed(item_id: str):
+    """Stamps the day the pre-buy Risk modal was opened, so the Bought flow can ask whether
+    it was looked at first. A nudge towards a habit, never a block on buying."""
+    items = load_watchlist()
+    watch_item = find_watch_item(items, item_id)
+    watch_item["risk_viewed_at"] = date.today().isoformat()
+    save_watchlist(items)
+    return watch_item
+
+
 @app.post("/api/watchlist/{item_id}/refresh")
 def refresh_watchlist_item(item_id: str):
     items = load_watchlist()
