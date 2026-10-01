@@ -199,6 +199,21 @@ replacement.
    purchases, against bullish ratings. It should be worded as a tension, not a verdict, since
    founders sell for diversification and often on a pre-set schedule (10b5-1). Finnhub's free
    data gives neither job titles nor the 10b5-1 flag, so the badge can name people but not roles.
+   **SEC EDGAR has both, free, and it changed the TOST answer completely** (checked 2026-10-01 by
+   reading the Form 4 filings): every August sale by the CEO, the CFO and the CRO was under a
+   10b5-1 plan adopted 5–9 months earlier, and the CEO's 300.000 shares were sold by a charitable
+   remainder trust while he still holds ~18,6 m Class B shares (about 1,6% of his stake). The
+   insider picture went from "a bit cautious" to neutral. In the Form 4 XML: `<aff10b5One>` (the
+   checkbox, filings since April 2023), `<officerTitle>`, footnotes giving the plan adoption date,
+   `<remarks>` with other holdings, and direct/indirect ownership. Path: the issuer's CIK from
+   `https://www.sec.gov/files/company_tickers.json`, its filings list from
+   `data.sec.gov/submissions/CIK##########.json`, then each Form 4's `.txt`/`.xml`. **Access rule**:
+   SEC refuses automated requests (403, tested) without a User-Agent naming a contact email, and
+   allows at most 10 requests a second. She will supply a low-importance address: it goes in
+   `.env` as `SEC_CONTACT_EMAIL`, never in code or docs. Cache per filing forever (a Form 4 never
+   changes) and the filings list per ticker per day. With this, "scheduled" sales can be shown
+   apart from discretionary ones, which is the distinction that decides whether a sale means
+   anything.
 
 ### Known loose ends
 - `sectors.ticker_sector()` returns `None` for FN and INOD — not in `sp500.json` and the Finnhub
