@@ -38,6 +38,7 @@ HOLDINGS_HISTORY_FILE = Path(__file__).parent / "data" / "holdings_history.json"
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 WATCHLIST_HISTORY_FILE = Path(__file__).parent / "data" / "watchlist_history.json"
 WATCH_ARCHIVE_FILE = Path(__file__).parent / "data" / "watchlist_archive.json"
+TAX_SETTINGS_FILE = Path(__file__).parent / "data" / "tax_settings.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -585,6 +586,8 @@ def sell_holding(holding_id: str, sell: SellRequest):
         "purchase_date": lots_sold[0]["purchase_date"] if lots_sold else holding["purchase_date"],
         "lots_sold": lots_sold,  # per-lot FIFO breakdown
         "remaining_shares": remaining_shares,
+        # Each bank nets its own losses at source, so the tax summary needs to know where.
+        "broker": holding.get("broker") or tax.DEFAULT_BROKER,
     }
 
     entries = load_sales_history()
@@ -1007,7 +1010,8 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
     # standalone 26,375% against a gain the year's losses already cover is an argument not to
     # sell that isn't true, whenever the year's banked losses cover the gain.
     estimated_tax = tax.tax_on_next_gain(
-        load_sales_history(), str(date.today().year), total_gain
+        load_sales_history(), str(date.today().year), total_gain,
+        broker=holding.get("broker") or tax.DEFAULT_BROKER, settings=load_tax_settings(),
     )["extra_tax"]
 
     pct_move = (current_price - reference_high) / reference_high
@@ -1438,7 +1442,44 @@ def get_sales_summary(year: Optional[str] = None):
     capital-gains tax works and showed tax owed in a year that was a net loss."""
     sales = load_sales_history()
     target = year or (tax.years(sales) or [str(date.today().year)])[0]
-    return tax.year_summary(sales, target)
+    brokers = [h.get("broker") or tax.DEFAULT_BROKER for h in load_holdings()]
+    return tax.by_bank(sales, target, load_tax_settings(), brokers)
+
+
+def load_tax_settings() -> dict:
+    """Per-bank figures only the bank knows: allowance left and, where the tool's own records
+    don't cover it, the share-loss pot. See tax.bank_summary()."""
+    if not TAX_SETTINGS_FILE.exists():
+        return {}
+    return json.loads(TAX_SETTINGS_FILE.read_text())
+
+
+class BankTaxIn(BaseModel):
+    allowance_left: Optional[float] = None
+    # Positive number: the losses the bank holds. None = compute from this tool's records.
+    share_loss_pot: Optional[float] = None
+    as_of: Optional[str] = None
+
+
+@app.get("/api/tax-settings")
+def get_tax_settings():
+    return load_tax_settings()
+
+
+@app.put("/api/tax-settings/{broker}")
+def put_tax_settings(broker: str, body: BankTaxIn):
+    if (body.allowance_left is not None and not 0 <= body.allowance_left <= tax.ANNUAL_ALLOWANCE_EUR) or (
+        body.share_loss_pot is not None and body.share_loss_pot < 0
+    ):
+        raise HTTPException(status_code=422, detail="Allowance must be 0–1.000 and the loss pot a positive amount.")
+    settings = load_tax_settings()
+    entry = {"allowance_left": body.allowance_left or 0.0}
+    if body.share_loss_pot is not None:
+        entry["share_loss_pot"] = body.share_loss_pot
+        entry["as_of"] = body.as_of or date.today().isoformat()
+    settings[broker] = entry
+    TAX_SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
+    return settings
 
 
 @app.get("/api/portfolio-history")

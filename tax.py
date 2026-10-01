@@ -44,15 +44,18 @@ def _year(sale: dict) -> Optional[str]:
     return stamp[:4] or None
 
 
-def year_summary(sales: list, year: str, carried_in: float = 0.0) -> dict:
-    """Realised gains, realised losses and what is actually owed for one calendar year."""
+def year_summary(sales: list, year: str, carried_in: float = 0.0,
+                 allowance: float = ANNUAL_ALLOWANCE_EUR) -> dict:
+    """Realised gains, realised losses and what is actually owed for one calendar year.
+    `allowance` is what is available against these sales — the whole Sparerpauschbetrag by
+    default, or only what is left at one bank when computing that bank on its own."""
     rows = [s for s in sales or [] if _year(s) == str(year)]
     gains = sum(s["realized_gain"] for s in rows if (s.get("realized_gain") or 0) > 0)
     losses = sum(s["realized_gain"] for s in rows if (s.get("realized_gain") or 0) < 0)
     net = gains + losses - carried_in
 
-    taxable = max(0.0, net - ANNUAL_ALLOWANCE_EUR)
-    allowance_used = min(max(net, 0.0), ANNUAL_ALLOWANCE_EUR)
+    taxable = max(0.0, net - allowance)
+    allowance_used = min(max(net, 0.0), allowance)
     return {
         "year": str(year),
         "sales": len(rows),
@@ -61,7 +64,7 @@ def year_summary(sales: list, year: str, carried_in: float = 0.0) -> dict:
         "net": net,
         "taxable": taxable,
         "estimated_tax": taxable * CAPITAL_GAINS_TAX_RATE,
-        "allowance": ANNUAL_ALLOWANCE_EUR,
+        "allowance": allowance,
         "allowance_used": allowance_used,
         # A negative net is not "no tax and nothing else" — it is a balance that reduces next
         # year's bill, which is the part the per-row column threw away.
@@ -75,12 +78,94 @@ def years(sales: list) -> list:
     return sorted({y for y in (_year(s) for s in sales or []) if y}, reverse=True)
 
 
-def tax_on_next_gain(sales: list, year: str, gain: float) -> dict:
+DEFAULT_BROKER = "Trade Republic"
+
+
+def sale_broker(sale: dict) -> str:
+    """Every sale recorded before brokers existed was on Trade Republic."""
+    return sale.get("broker") or DEFAULT_BROKER
+
+
+# Each bank keeps its own loss pot and applies only the allowance filed with it
+# (Freistellungsauftrag), so tax withheld at source has to be computed bank by bank. A loss at
+# one bank does not reduce tax withheld at the other — that only happens in the yearly tax
+# return, and only if the bank holding the losses issues a Verlustbescheinigung, which has to
+# be requested by 15 December (the pot is then closed there rather than carried forward).
+#
+# Settings per broker, from data/tax_settings.json:
+#   allowance_left   — what is left of the allowance filed at that bank this year (dividends
+#                      use it up first). Missing → 0, except when no bank has settings at all,
+#                      where the old single-bank assumption (the whole allowance) still holds.
+#   share_loss_pot   — the bank's own reported share-loss pot, as a positive number, with
+#                      `as_of`. When set, it replaces this tool's records up to that date and
+#                      only sales recorded after it are added. When missing, the pot is
+#                      computed from this tool's own sales log (right for Trade Republic,
+#                      whose 2026 sales are all recorded here).
+def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] = None,
+                 any_settings: bool = True) -> dict:
+    settings = settings or {}
+    rows = [s for s in sales or [] if sale_broker(s) == broker]
+    pot = settings.get("share_loss_pot")
+    as_of = settings.get("as_of")
+    carried_in = 0.0
+    if pot is not None:
+        carried_in = float(pot)
+        if as_of:
+            rows = [s for s in rows if (s.get("sell_datetime") or s.get("sell_date") or "")[:10] > as_of]
+    if "allowance_left" in settings:
+        allowance = float(settings["allowance_left"] or 0)
+    else:
+        allowance = 0.0 if any_settings else ANNUAL_ALLOWANCE_EUR
+    summary = year_summary(rows, year, carried_in=carried_in, allowance=allowance)
+    summary.update({"broker": broker, "pot_as_of": as_of if pot is not None else None,
+                    "pot_from": "bank" if pot is not None else "records"})
+    return summary
+
+
+def by_bank(sales: list, year: str, settings: dict, brokers: list) -> dict:
+    """Each bank on its own (what is withheld at source), then the year as the tax return sees
+    it once losses are moved across with a Verlustbescheinigung."""
+    names = sorted(set(brokers) | {sale_broker(s) for s in sales or []} | set(settings or {}))
+    any_settings = bool(settings)
+    banks = [bank_summary(sales, year, b, (settings or {}).get(b), any_settings) for b in names]
+    net = sum(b["net"] for b in banks)
+    taxable = max(0.0, net - ANNUAL_ALLOWANCE_EUR)
+    return {
+        "year": str(year),
+        "banks": banks,
+        "at_source_tax": sum(b["estimated_tax"] for b in banks),
+        "combined": {
+            "net": net,
+            "taxable": taxable,
+            "estimated_tax": taxable * CAPITAL_GAINS_TAX_RATE,
+            "carry_forward": abs(net) if net < 0 else 0.0,
+        },
+    }
+
+
+def tax_on_next_gain(sales: list, year: str, gain: float, broker: Optional[str] = None,
+                     settings: Optional[dict] = None) -> dict:
     """What one more sale would actually add to the year's tax — the question the sell
     preview is really asking. It used to answer `max(0, gain) * rate`, which ignores every
     loss already banked: when realised losses in the pot exceed the gain being considered,
     the sale adds nothing, and quoting the standalone rate is an argument not to sell that is
-    simply untrue."""
+    simply untrue.
+
+    With a broker, it is that bank's pot and that bank's allowance — what would actually be
+    withheld when selling there."""
+    if broker is not None:
+        bank_settings = (settings or {}).get(broker)
+        any_settings = bool(settings)
+        before = bank_summary(sales, year, broker, bank_settings, any_settings)
+        extra = {"sell_datetime": f"{year}-12-31", "realized_gain": gain, "broker": broker}
+        after = bank_summary(sales + [extra], year, broker, bank_settings, any_settings)
+        return {
+            "tax_before": before["estimated_tax"],
+            "tax_after": after["estimated_tax"],
+            "extra_tax": after["estimated_tax"] - before["estimated_tax"],
+            "net_before": before["net"],
+            "offset_available": before["carry_forward"],
+        }
     before = year_summary(sales, year)
     after = year_summary(sales + [{"sell_datetime": f"{year}-01-01", "realized_gain": gain}], year)
     return {

@@ -3398,48 +3398,110 @@ function fmtSellDatetime(s) {
 // German capital-gains tax nets losses against gains within the year, so a per-sale figure
 // is not an estimate of anything — it is the gain taxed as if no loss had happened. The
 // column that did that showed hundreds of euros of tax in a year that was a net loss.
-function renderSalesSummary(s) {
+function renderSalesSummary(s, settings) {
   const box = document.getElementById("sales-summary");
   if (!box) return;
-  if (!s || !s.sales) {
+  if (!s || !s.banks || !s.banks.length) {
     box.innerHTML = "";
     return;
   }
-  // The allowance is a round 1.000, so print it round — "1.000,00 EUR" reads as a
-  // calculated figure when it is a fixed rule.
-  const allowance = euIntFormat.format(s.allowance);
-  const owes = s.estimated_tax > 0;
-  const verdict = owes
-    ? `<p>After the ${allowance} EUR yearly allowance, ${fmt(
-        s.taxable
-      )} EUR is taxable — roughly <strong>${fmt(s.estimated_tax)} EUR</strong> of tax.</p>`
-    : s.carry_forward > 0
-    ? `<p>Your losses are bigger than your gains, so there is <strong>no tax to pay</strong> on these sales. The extra <strong>${fmt(
-        s.carry_forward
-      )} EUR</strong> of losses is not wasted — it comes off the tax on your future gains.</p>`
-    : `<p>Your gains are inside the ${fmt(
-        s.allowance
-      )} EUR yearly allowance, so there is <strong>no tax to pay</strong> on these sales.</p>`;
+  const allowanceRule = euIntFormat.format(1000);
+  const bankBlock = (b) => {
+    const entered = settings && settings[b.broker];
+    const pot =
+      b.pot_from === "bank"
+        ? `<tr><td>Loss pot the bank reported on ${fmtDate(b.pot_as_of)}</td><td class="price-down">−${fmt(b.carried_in)} EUR</td></tr>`
+        : "";
+    const rows = b.sales || b.pot_from === "bank"
+      ? `<table class="mini-table"><tbody>
+          ${b.sales ? `<tr><td>Profit on sales that made money</td><td class="price-up">${fmt(b.gains)} EUR</td></tr>
+          <tr><td>Loss on sales that lost money</td><td class="price-down">${fmt(b.losses)} EUR</td></tr>` : ""}
+          ${pot}
+          <tr><td><strong>Together</strong></td><td><strong>${fmt(b.net)} EUR</strong></td></tr>
+          <tr><td>Allowance left at this bank</td><td>${fmt(b.allowance)} EUR</td></tr>
+        </tbody></table>`
+      : "";
+    const verdict = !entered && b.pot_from !== "bank" && !b.sales
+      ? `<p class="subtitle">No sales recorded here and no figures entered yet — enter this bank's loss pot and allowance below.</p>`
+      : b.estimated_tax > 0
+      ? `<p>Selling here so far would mean roughly <strong>${fmt(b.estimated_tax)} EUR</strong> withheld by the bank.</p>`
+      : b.carry_forward > 0
+      ? `<p>No tax withheld here. This bank holds <strong>${fmt(b.carry_forward)} EUR</strong> of losses that come off the tax on future gains <em>at this bank</em>.</p>`
+      : `<p>No tax withheld here — the gains are inside this bank's allowance.</p>`;
+    return `<div class="bank-tax"><strong>${escapeHtml(b.broker)}</strong>${b.sales ? ` <span class="subtitle">· ${b.sales} sales in ${s.year}</span>` : ""}${rows}${verdict}</div>`;
+  };
+
+  const c = s.combined;
+  const across = s.banks.length > 1
+    ? `<p><strong>After your tax return:</strong> ${
+        c.estimated_tax > 0
+          ? `all banks together come to ${fmt(c.net)} EUR, roughly <strong>${fmt(c.estimated_tax)} EUR</strong> of tax after the ${allowanceRule} EUR allowance.`
+          : c.carry_forward > 0
+          ? `all banks together are a net loss of ${fmt(c.carry_forward)} EUR — no tax.`
+          : `all banks together are inside the ${allowanceRule} EUR allowance — no tax.`
+      } Each bank only nets its own losses when it withholds tax. A loss at one bank reduces tax on gains at another only through the yearly tax return, and only if you ask the bank holding the losses for a <em>Verlustbescheinigung</em> by <strong>15 December</strong> — it then closes its pot instead of carrying it forward.</p>`
+    : "";
+
+  const form = s.banks
+    .map((b) => {
+      const e = (settings && settings[b.broker]) || {};
+      const id = b.broker.replace(/[^a-z0-9]/gi, "_");
+      return `<div class="add-form bank-tax-form">
+        <div><label>${escapeHtml(b.broker)} — allowance left</label><input id="tx-allow-${id}" type="text" inputmode="decimal" value="${
+          e.allowance_left != null ? toEuInput(e.allowance_left) : ""
+        }" placeholder="0" /></div>
+        <div><label>Share-loss pot (leave empty to use this tool's sales)</label><input id="tx-pot-${id}" type="text" inputmode="decimal" value="${
+          e.share_loss_pot != null ? toEuInput(e.share_loss_pot) : ""
+        }" /></div>
+        <div><label>As of</label><input id="tx-asof-${id}" type="date" value="${e.as_of || ""}" /></div>
+        <button class="secondary" onclick="saveBankTax('${escapeHtml(b.broker)}', '${id}')">Save</button>
+      </div>`;
+    })
+    .join("");
 
   box.innerHTML = `
     <div class="tensions">
-      <strong>${s.year} — ${s.sales} sales</strong>
-      <table class="mini-table"><tbody>
-        <tr><td>Profit on the ones that made money</td><td class="price-up">${fmt(s.gains)} EUR</td></tr>
-        <tr><td>Loss on the ones that lost money</td><td class="price-down">${fmt(s.losses)} EUR</td></tr>
-        <tr><td><strong>Together</strong></td><td><strong>${fmt(s.net)} EUR</strong></td></tr>
-      </tbody></table>
-      ${verdict}
-      <p class="subtitle">An estimate at 26,375% (tax plus Soli, no church tax). Trade Republic settles the real figure with the Finanzamt itself, and the ${allowance} EUR allowance is shared across every account you hold — so if you used some of it elsewhere, less of it is left here.</p>
+      <strong>${s.year} — tax by bank</strong>
+      ${s.banks.map(bankBlock).join("")}
+      ${across}
+      <p class="subtitle">An estimate at 26,375% (tax plus Soli, no church tax). Each bank settles the real figure with the Finanzamt itself. Dividends use up the allowance before any sale does.</p>
+      <details class="bank-tax-settings"><summary>Figures only your bank knows</summary>
+        <p class="subtitle">From each bank's tax overview: the allowance still left this year (Freistellungsauftrag), and the share-loss pot (Aktienverluste) with its date.</p>
+        ${form}
+      </details>
     </div>`;
+}
+
+async function saveBankTax(broker, id) {
+  const allow = parseEuNumber(document.getElementById(`tx-allow-${id}`).value || "0");
+  const potRaw = document.getElementById(`tx-pot-${id}`).value.trim();
+  const pot = potRaw ? Math.abs(parseEuNumber(potRaw)) : null;
+  if (isNaN(allow) || (potRaw && isNaN(pot))) {
+    alert("Enter the amounts as numbers.");
+    return;
+  }
+  const res = await fetch(`/api/tax-settings/${encodeURIComponent(broker)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      allowance_left: allow,
+      share_loss_pot: pot,
+      as_of: document.getElementById(`tx-asof-${id}`).value || null,
+    }),
+  });
+  if (!res.ok) {
+    alert((await res.json()).detail || "Could not save.");
+    return;
+  }
+  await loadHistory();
 }
 
 async function loadHistory() {
   const res = await fetch("/api/sales-history");
   const entries = await res.json();
   try {
-    const sres = await fetch("/api/sales-summary");
-    renderSalesSummary(await sres.json());
+    const [sres, tres] = await Promise.all([fetch("/api/sales-summary"), fetch("/api/tax-settings")]);
+    renderSalesSummary(await sres.json(), await tres.json());
   } catch (e) {
     /* the table is the point; a missing summary must not empty it */
   }
