@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -88,6 +89,72 @@ def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
     cache[ticker] = {"fetched_date": today, "result": result}
     _save_news_sentiment_cache(cache)
     return result
+
+
+DIVIDENDS_CACHE_FILE = Path(__file__).parent / "data" / "dividends_cache.json"
+DIVIDENDS_REFRESH_DAYS = 7  # dividends are declared ~2 weeks ahead and paid quarterly
+_last_dividend_call = 0.0
+
+
+def fetch_dividends(ticker: str, cached_only: bool = False) -> list:
+    """Every dividend Alpha Vantage knows for a ticker, newest first: payment date, ex-date
+    and amount per share in USD. It includes ones already declared but not yet paid.
+    Finnhub's equivalent is paid-tier (403, live-tested 2026-10-01).
+
+    Cached a week per ticker: the list only changes when a new dividend is declared, and the
+    free key's 25 calls a day are shared with price history and sentiment. A failed fetch
+    falls back to whatever is cached, however old, since a dividend paid stays paid."""
+    global _last_dividend_call
+    cache = json.loads(DIVIDENDS_CACHE_FILE.read_text()) if DIVIDENDS_CACHE_FILE.exists() else {}
+    cached = cache.get(ticker)
+    fresh = cached and (date.today() - date.fromisoformat(cached["fetched_date"])).days < DIVIDENDS_REFRESH_DAYS
+    if fresh or (cached and cached_only):
+        return cached["dividends"]
+    if cached_only:
+        raise AlphaVantageError(f"No dividends cached for '{ticker}'")
+    if not ALPHA_VANTAGE_API_KEY:
+        raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
+
+    # The free key also refuses bursts faster than about one call a second.
+    wait = 1.5 - (time.time() - _last_dividend_call)
+    if wait > 0:
+        time.sleep(wait)
+    _last_dividend_call = time.time()
+    try:
+        res = requests.get(
+            ALPHA_VANTAGE_URL,
+            params={"function": "DIVIDENDS", "symbol": ticker, "apikey": ALPHA_VANTAGE_API_KEY},
+            timeout=15,
+        )
+        res.raise_for_status()
+        data = res.json()
+    except requests.RequestException as e:
+        if cached:
+            return cached["dividends"]
+        raise AlphaVantageError(f"Could not fetch dividends for '{ticker}': {e}") from e
+
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        if cached:
+            return cached["dividends"]
+        message = data.get("Information") or data.get("Note") or data.get("Error Message") or "Unknown error"
+        raise AlphaVantageError(f"Alpha Vantage did not return dividends for '{ticker}': {message}")
+
+    dividends = []
+    for r in rows:
+        try:
+            dividends.append({
+                "payment_date": r["payment_date"],
+                "ex_dividend_date": r["ex_dividend_date"],
+                "amount": float(r["amount"]),
+            })
+        except (KeyError, ValueError, TypeError):
+            continue  # "None" dates on very old rows
+    dividends = [d for d in dividends if d["payment_date"][:1].isdigit()]
+    dividends.sort(key=lambda d: d["payment_date"], reverse=True)
+    cache[ticker] = {"fetched_date": date.today().isoformat(), "dividends": dividends[:12]}
+    DIVIDENDS_CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    return cache[ticker]["dividends"]
 
 
 def _load_price_history_cache() -> dict:

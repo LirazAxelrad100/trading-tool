@@ -101,6 +101,8 @@ def sale_broker(sale: dict) -> str:
 #                      only sales recorded after it are added. When missing, the pot is
 #                      computed from this tool's own sales log (right for Trade Republic,
 #                      whose 2026 sales are all recorded here).
+#   as_of            — also dates the allowance: dividends paid after it are taken off.
+#   dividends        — not stored; added at read time by main.tax_settings_with_dividends().
 def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] = None,
                  any_settings: bool = True) -> dict:
     settings = settings or {}
@@ -116,9 +118,15 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
         allowance = float(settings["allowance_left"] or 0)
     else:
         allowance = 0.0 if any_settings else ANNUAL_ALLOWANCE_EUR
+    entered = allowance
+    # Dividends paid since the allowance was read have used part of it (see dividends.py).
+    divs = settings.get("dividends")
+    if divs:
+        allowance = max(0.0, allowance - divs["paid_eur"])
     summary = year_summary(rows, year, carried_in=carried_in, allowance=allowance)
     summary.update({"broker": broker, "pot_as_of": as_of if pot is not None else None,
-                    "pot_from": "bank" if pot is not None else "records"})
+                    "pot_from": "bank" if pot is not None else "records",
+                    "allowance_entered": entered, "dividends": divs})
     return summary
 
 

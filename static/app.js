@@ -3395,6 +3395,56 @@ function fmtSellDatetime(s) {
   return `${d.toLocaleDateString("de-DE")} ${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+// The allowance is typed in from the bank with a date, and every dividend after that date
+// uses part of it. Showing the entered figure, the dividends and what is left keeps the
+// subtraction visible, so a figure that moved on its own is never a mystery.
+function allowanceRows(b) {
+  const d = b.dividends;
+  if (!d || !d.paid_eur) return `<tr><td>Allowance left at this bank</td><td>${fmt(b.allowance)} EUR</td></tr>`;
+  return `<tr><td>Allowance you entered on ${fmtDate(d.since)}</td><td>${fmt(b.allowance_entered)} EUR</td></tr>
+    <tr><td>Dividends paid since (before tax)</td><td class="price-down">−${fmt(d.paid_eur)} EUR</td></tr>
+    <tr><td><strong>Allowance left now</strong></td><td><strong>${fmt(b.allowance)} EUR</strong></td></tr>`;
+}
+
+// Dividends only change the tax on a sale where there is an allowance to use up, so this
+// line appears only at such a bank. It answers the question for a sale planned later in the
+// year: how much allowance will still be there by then.
+function dividendLine(b) {
+  const d = b.dividends;
+  if (!d) return "";
+  const parts = [];
+  if (d.allowance_last_year) {
+    parts.push(`The allowance figure is from ${fmtDate(d.since)}. It resets on 1 January — enter this year's from the bank.`);
+  }
+  if (d.paid.length) {
+    parts.push(`Paid since ${fmtDate(d.since)}: ${d.paid.map((x) => `${escapeHtml(x.ticker)} ${fmtDate(x.payment_date)} (${fmt(x.eur)} EUR)`).join(", ")}.`);
+  }
+  if (d.expected.length) {
+    const left = b.allowance - d.expected_eur;
+    const list = d.expected
+      .map((x) => `${escapeHtml(x.ticker)} ${x.estimated ? "around " : ""}${fmtDate(x.payment_date)}`)
+      .join(", ");
+    parts.push(
+      `Still to come this year: about <strong>${fmt(d.expected_eur)} EUR</strong> in dividends (${list}). ${
+        left > 0
+          ? `A sale after those dates would find about ${fmt(left)} EUR of the allowance left`
+          : `They would use up the rest of the allowance — a sale after them gets none`
+      }${
+        // A sale's profit meets the loss pot first; the allowance only counts past it.
+        b.carry_forward > 0 ? `, which only matters once a sale's profit here is bigger than the ${fmt(b.carry_forward)} EUR loss pot.` : "."
+      }`
+    );
+  }
+  if (d.missing.length) {
+    parts.push(`No dividend data for ${d.missing.map(escapeHtml).join(", ")} — left out of these figures.`);
+  }
+  if (!parts.length) return "";
+  const estimated = d.expected.some((x) => x.estimated)
+    ? ` Dates marked "around" are last year's payment dates a year on, until the company announces them.`
+    : "";
+  return `<p class="subtitle">${parts.join(" ")}${estimated} Amounts before tax, at today's dollar rate.</p>`;
+}
+
 // German capital-gains tax nets losses against gains within the year, so a per-sale figure
 // is not an estimate of anything — it is the gain taxed as if no loss had happened. The
 // column that did that showed hundreds of euros of tax in a year that was a net loss.
@@ -3418,7 +3468,7 @@ function renderSalesSummary(s, settings) {
           <tr><td>Loss on sales that lost money</td><td class="price-down">${fmt(b.losses)} EUR</td></tr>` : ""}
           ${pot}
           <tr><td><strong>Together</strong></td><td><strong>${fmt(b.net)} EUR</strong></td></tr>
-          <tr><td>Allowance left at this bank</td><td>${fmt(b.allowance)} EUR</td></tr>
+          ${allowanceRows(b)}
         </tbody></table>`
       : "";
     const verdict = !entered && b.pot_from !== "bank" && !b.sales
@@ -3428,7 +3478,7 @@ function renderSalesSummary(s, settings) {
       : b.carry_forward > 0
       ? `<p>No tax withheld here. This bank holds <strong>${fmt(b.carry_forward)} EUR</strong> of losses that come off the tax on future gains <em>at this bank</em>.</p>`
       : `<p>No tax withheld here — the gains are inside this bank's allowance.</p>`;
-    return `<div class="bank-tax"><strong>${escapeHtml(b.broker)}</strong>${b.sales ? ` <span class="subtitle">· ${b.sales} sales in ${s.year}</span>` : ""}${rows}${verdict}</div>`;
+    return `<div class="bank-tax"><strong>${escapeHtml(b.broker)}</strong>${b.sales ? ` <span class="subtitle">· ${b.sales} sales in ${s.year}</span>` : ""}${rows}${verdict}${dividendLine(b)}</div>`;
   };
 
   const c = s.combined;
@@ -3453,7 +3503,7 @@ function renderSalesSummary(s, settings) {
         <div><label>Share-loss pot (leave empty to use this tool's sales)</label><input id="tx-pot-${id}" type="text" inputmode="decimal" value="${
           e.share_loss_pot != null ? toEuInput(e.share_loss_pot) : ""
         }" /></div>
-        <div><label>As of</label><input id="tx-asof-${id}" type="date" value="${e.as_of || ""}" /></div>
+        <div><label>Date you read these</label><input id="tx-asof-${id}" type="date" value="${e.as_of || ""}" /></div>
         <button class="secondary" onclick="saveBankTax('${escapeHtml(b.broker)}', '${id}')">Save</button>
       </div>`;
     })
@@ -3466,7 +3516,7 @@ function renderSalesSummary(s, settings) {
       ${across}
       <p class="subtitle">An estimate at 26,375% (tax plus Soli, no church tax). Each bank settles the real figure with the Finanzamt itself. Dividends use up the allowance before any sale does.</p>
       <details class="bank-tax-settings"><summary>Figures only your bank knows</summary>
-        <p class="subtitle">From each bank's tax overview: the allowance still left this year (Freistellungsauftrag), and the share-loss pot (Aktienverluste) with its date.</p>
+        <p class="subtitle">From each bank's tax overview: the allowance still left this year (Freistellungsauftrag), and the share-loss pot (Aktienverluste). Dividends paid after the date are taken off the allowance automatically.</p>
         ${form}
       </details>
     </div>`;

@@ -18,6 +18,7 @@ import breadth
 import cash_flow
 import concentration
 import consensus_store
+import dividends
 import fundamentals
 import ls_tc
 import momentum
@@ -1011,7 +1012,9 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
     # sell that isn't true, whenever the year's banked losses cover the gain.
     estimated_tax = tax.tax_on_next_gain(
         load_sales_history(), str(date.today().year), total_gain,
-        broker=holding.get("broker") or tax.DEFAULT_BROKER, settings=load_tax_settings(),
+        broker=holding.get("broker") or tax.DEFAULT_BROKER,
+        # Cached only: this runs per holding on every refresh and must not spend Alpha Vantage calls.
+        settings=tax_settings_with_dividends(holding.get("broker") or tax.DEFAULT_BROKER, cached_only=True),
     )["extra_tax"]
 
     pct_move = (current_price - reference_high) / reference_high
@@ -1441,9 +1444,12 @@ def get_sales_summary(year: Optional[str] = None):
     figure each row carries is the gain taxed on its own, which is not how German
     capital-gains tax works and showed tax owed in a year that was a net loss."""
     sales = load_sales_history()
-    target = year or (tax.years(sales) or [str(date.today().year)])[0]
+    this_year = str(date.today().year)
+    target = year or (tax.years(sales) or [this_year])[0]
     brokers = [h.get("broker") or tax.DEFAULT_BROKER for h in load_holdings()]
-    return tax.by_bank(sales, target, load_tax_settings(), brokers)
+    # Dividends are this year's; a past year's summary uses the figures as entered.
+    settings = tax_settings_with_dividends() if target == this_year else load_tax_settings()
+    return tax.by_bank(sales, target, settings, brokers)
 
 
 def load_tax_settings() -> dict:
@@ -1452,6 +1458,27 @@ def load_tax_settings() -> dict:
     if not TAX_SETTINGS_FILE.exists():
         return {}
     return json.loads(TAX_SETTINGS_FILE.read_text())
+
+
+def tax_settings_with_dividends(only_broker: Optional[str] = None, cached_only: bool = False) -> dict:
+    """The stored settings, with each bank's dividends since its allowance was read attached,
+    so the allowance a sale would meet is the one actually left. Only banks with an allowance
+    are looked at: elsewhere a dividend cannot change the tax on a sale. See dividends.py."""
+    settings = load_tax_settings()
+    holdings = load_holdings()
+    rate = None
+    for broker, entry in settings.items():
+        if only_broker and broker != only_broker:
+            continue
+        if not entry.get("allowance_left") or not any((h.get("broker") or tax.DEFAULT_BROKER) == broker for h in holdings):
+            continue
+        if rate is None:
+            try:
+                rate = prices.fetch_usd_to_eur_rate()
+            except PriceError:
+                return settings  # figures as entered; the summary still renders
+        entry["dividends"] = dividends.for_bank(holdings, broker, entry.get("as_of"), rate, cached_only=cached_only)
+    return settings
 
 
 class BankTaxIn(BaseModel):
@@ -1473,10 +1500,10 @@ def put_tax_settings(broker: str, body: BankTaxIn):
     ):
         raise HTTPException(status_code=422, detail="Allowance must be 0–1.000 and the loss pot a positive amount.")
     settings = load_tax_settings()
-    entry = {"allowance_left": body.allowance_left or 0.0}
+    # The date dates the allowance too: dividends paid after it are taken off (dividends.py).
+    entry = {"allowance_left": body.allowance_left or 0.0, "as_of": body.as_of or date.today().isoformat()}
     if body.share_loss_pot is not None:
         entry["share_loss_pot"] = body.share_loss_pot
-        entry["as_of"] = body.as_of or date.today().isoformat()
     settings[broker] = entry
     TAX_SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
     return settings
