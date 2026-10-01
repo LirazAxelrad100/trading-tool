@@ -1,6 +1,8 @@
 import copy
+import json
 import time
 from datetime import date
+from pathlib import Path
 
 import main
 import notifier
@@ -26,17 +28,18 @@ def fetch_rate_with_retry() -> float:
     raise last_error
 
 
-def send_email_with_retry(subject: str, body: str) -> None:
+def send_email_with_retry(subject: str, body: str) -> bool:
     last_error = None
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
             notifier.send_email(subject, body)
-            return
+            return True
         except Exception as e:
             last_error = e
             if attempt < RETRY_ATTEMPTS:
                 time.sleep(RETRY_DELAY_SECONDS)
     print(f"Failed to send email after {RETRY_ATTEMPTS} attempts: {last_error}")
+    return False
 
 
 def eu_num(n: float) -> str:
@@ -100,6 +103,47 @@ def price_holding(holding: dict, get_rate) -> None:
     main.apply_quote(holding, prices.fetch_quote(holding["ticker"], rate), rate)
 
 
+REMINDED_FILE = Path(__file__).parent / "data" / "dividend_reminders.json"
+
+
+def eu_date(iso: str) -> str:
+    y, m, d = iso[:10].split("-")
+    return f"{d}.{m}.{y}"
+
+
+def dividend_reminders() -> list:
+    """Dividends paid since a bank's allowance figure was entered, not yet reminded about.
+    The tool subtracts them as an estimate (dividends.py), but the bank's own figure is exact,
+    so each payment earns one email asking to re-enter it. Re-entering moves the date past
+    the payment, and the reminder stops on its own."""
+    reminded = set(json.loads(REMINDED_FILE.read_text())) if REMINDED_FILE.exists() else set()
+    out = []
+    for broker, entry in main.tax_settings_with_dividends().items():
+        d = entry.get("dividends")
+        if not d:
+            continue
+        for p in d["paid"]:
+            key = f"{broker}|{p['ticker']}|{p['payment_date']}"
+            if key not in reminded:
+                out.append({**p, "broker": broker, "key": key, "since": d["since"],
+                            "allowance_now": max(0.0, entry["allowance_left"] - d["paid_eur"])})
+    return out
+
+
+def format_dividends(due: list) -> list:
+    """One line per bank: what was paid, then the single thing to do."""
+    lines = []
+    for broker in sorted({r["broker"] for r in due}):
+        rows = [r for r in due if r["broker"] == broker]
+        paid = ", ".join(f"{r['ticker']} on {eu_date(r['payment_date'])} ({eu_num(r['eur'])} EUR)" for r in rows)
+        lines.append(
+            f"{broker}: dividends paid since your allowance figure of {eu_date(rows[0]['since'])}: {paid}, "
+            f"before tax. The tool now estimates {eu_num(rows[0]['allowance_now'])} EUR left. Read the exact "
+            f"figure in the bank's app and enter it in History -> Figures only your bank knows."
+        )
+    return lines
+
+
 def run() -> None:
     holdings = main.load_holdings()
     before = copy.deepcopy(holdings)
@@ -155,7 +199,15 @@ def run() -> None:
     main.record_portfolio_snapshot(holdings)  # daily portfolio-value point for the chart
     main.record_holdings_snapshot(holdings)  # daily per-holding value point for the weekly table
 
-    if not breakouts and not stop_hits and not errors:
+    # A dividend reminder must never cost the stop check its email, so any failure here
+    # (no FX rate, Alpha Vantage down) just skips it until tomorrow.
+    try:
+        dividends_due = dividend_reminders()
+    except Exception as e:
+        print(f"dividend reminder skipped: {e}")
+        dividends_due = []
+
+    if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")
         return
 
@@ -171,14 +223,25 @@ def run() -> None:
     if errors:
         lines.append(f"{len(errors)} ticker(s) failed to fetch:")
         lines += [f"  - {format_error(r)}" for r in errors]
+        lines.append("")
+    if dividends_due:
+        lines.append("Allowance to update:")
+        lines += [f"  - {line}" for line in format_dividends(dividends_due)]
 
     body = "\n".join(lines)
-    subject = (
-        f"Trading tool: {len(stop_hits)} stop hit(s), "
-        f"{len(breakouts)} update(s), {len(errors)} error(s)"
-    )
-    send_email_with_retry(subject, body)
+    if stop_hits or breakouts or errors:
+        subject = (
+            f"Trading tool: {len(stop_hits)} stop hit(s), "
+            f"{len(breakouts)} update(s), {len(errors)} error(s)"
+        ) + (", allowance to update" if dividends_due else "")
+    else:
+        subject = f"Trading tool: dividend paid, update your {dividends_due[0]['broker']} allowance"
+    sent = send_email_with_retry(subject, body)
     print(body)
+    if dividends_due and sent:
+        # Marked only once the email went out, so a failed send reminds again tomorrow.
+        done = set(json.loads(REMINDED_FILE.read_text())) if REMINDED_FILE.exists() else set()
+        REMINDED_FILE.write_text(json.dumps(sorted(done | {r["key"] for r in dividends_due}), indent=2))
 
 
 if __name__ == "__main__":

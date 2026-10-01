@@ -3419,6 +3419,11 @@ function dividendLine(b) {
   if (d.paid.length) {
     parts.push(`Paid since ${fmtDate(d.since)}: ${d.paid.map((x) => `${escapeHtml(x.ticker)} ${fmtDate(x.payment_date)} (${fmt(x.eur)} EUR)`).join(", ")}.`);
   }
+  // The subtraction is an estimate (today's dollar rate); the bank's figure is exact. The
+  // note goes away by itself once the figure is re-entered with a later date.
+  const update = d.paid.length
+    ? `<p><strong>Update your allowance:</strong> a dividend has been paid since your figure. Read "allowance left" in the bank's app and enter it under <em>Figures only your bank knows</em>, with today's date.</p>`
+    : "";
   if (d.expected.length) {
     const left = b.allowance - d.expected_eur;
     const list = d.expected
@@ -3442,7 +3447,7 @@ function dividendLine(b) {
   const estimated = d.expected.some((x) => x.estimated)
     ? ` Dates marked "around" are last year's payment dates a year on, until the company announces them.`
     : "";
-  return `<p class="subtitle">${parts.join(" ")}${estimated} Amounts before tax, at today's dollar rate.</p>`;
+  return `${update}<p class="subtitle">${parts.join(" ")}${estimated} Amounts before tax, at today's dollar rate.</p>`;
 }
 
 // German capital-gains tax nets losses against gains within the year, so a per-sale figure
