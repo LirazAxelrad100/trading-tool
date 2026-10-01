@@ -167,6 +167,12 @@ def _save_price_history_cache(cache: dict) -> None:
     PRICE_HISTORY_CACHE_FILE.write_text(json.dumps(cache, indent=2))
 
 
+def prices_cached_today(ticker: str) -> bool:
+    """Whether fetch_daily_prices() would answer from cache, i.e. without spending a call."""
+    cached = _load_price_history_cache().get(ticker)
+    return bool(cached) and cached.get("fetched_date") == date.today().isoformat()
+
+
 def fetch_daily_prices(ticker: str, days: int = 30) -> list:
     """Daily OHLCV bars for a ticker, oldest first, in USD. Cached per ticker per day
     since this shares Alpha Vantage's 25-requests/day free-tier cap with sentiment.

@@ -239,7 +239,7 @@ def _down_day_behaviour(returns_by_ticker: dict, portfolio: list) -> Optional[di
 
 
 def compare_candidate(ticker: str, holdings: list, history: list, sales: Optional[list] = None,
-                      watchlist_history: Optional[list] = None) -> dict:
+                      watchlist_history: Optional[list] = None, cached_only: bool = False) -> dict:
     """Would buying this add to an existing bloc, or genuinely diversify?
 
     `analyze()` can only group things already held, because holdings_history records only
@@ -272,13 +272,6 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     # Prefer the series this tool records itself: Finnhub's free tier serves no price history
     # (candles 403), so the fallback is Alpha Vantage against a 25/day cap. Once the watch list
     # has been refreshed on enough days, the comparison costs nothing.
-    closes = {p["date"]: p["price"] for p in (watchlist_history or []) if p["ticker"] == ticker}
-    source = "recorded"
-    if len({d for d in dates if d in closes}) < MIN_WORST_DAYS * 2:
-        bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
-        closes = {b["date"]: b["close"] for b in bars}
-        source = "alpha vantage"
-
     # Market series first: if it's available, restrict to days all three cover rather than
     # requiring the market to have every date — that feed lags a day or two, so demanding a
     # full overlap silently disabled the adjustment.
@@ -288,7 +281,23 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     except Exception:
         market = {}
 
-    shared = [d for d in dates if d in closes and (not market or d in market)]
+    def usable(series: dict) -> list:
+        return [d for d in dates if d in series and (not market or d in market)]
+
+    closes = {p["date"]: p["price"] for p in (watchlist_history or []) if p["ticker"] == ticker}
+    source = "recorded"
+    # Judged on the days that survive the market intersection, not on the recorded days alone:
+    # with 8 recorded days the recorded series used to "pass", then lose its newest days to the
+    # lagging market feed and fail outright instead of falling back (INOD, RDDT, 2026-10-01).
+    if len(usable(closes)) < MIN_WORST_DAYS * 2:
+        # cached_only: the Risk modal shows an earlier Check on open, but must not spend a call.
+        if cached_only and not alpha_vantage.prices_cached_today(ticker):
+            return {"cached": False}
+        bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
+        closes = {b["date"]: b["close"] for b in bars}
+        source = "alpha vantage"
+
+    shared = usable(closes)
     if len(shared) < MIN_WORST_DAYS * 2:
         return {"error": f"Not enough overlapping days to compare {ticker} against your holdings."}
 

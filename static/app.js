@@ -2766,6 +2766,7 @@ function openRiskModal(id) {
   renderRiskPreview();
   renderRiskContext();
   loadRiskStops(false);
+  checkOverlap(false);
   document.getElementById("risk-modal").style.display = "flex";
   markRiskViewed(w);
 }
@@ -2929,18 +2930,25 @@ function renderRiskContext() {
 
 // Answers the overlap question rather than asking it. Kept behind a button because it spends
 // from the 25/day Alpha Vantage budget the first time a ticker is checked on a given day.
-async function checkOverlap() {
+// spend=false is the free read on open: it shows a Check that already ran today and leaves
+// the button in place otherwise.
+async function checkOverlap(spend = true) {
   const slot = document.getElementById("overlap-slot");
   if (!slot || !riskTicker) return;
-  slot.innerHTML = "Checking…";
+  const ticker = riskTicker.ticker;
+  if (spend) slot.innerHTML = "Checking…";
   try {
+    const q = spend ? "" : "?cached_only=true";
     // Both reads share alpha_vantage's per-ticker-per-day cache, so this is one call.
     const [res, posRes] = await Promise.all([
-      fetch(`/api/concentration/compare/${riskTicker.ticker}`),
-      fetch(`/api/breadth/position/${riskTicker.ticker}`),
+      fetch(`/api/concentration/compare/${ticker}${q}`),
+      fetch(`/api/breadth/position/${ticker}${q}`),
     ]);
     const d = await res.json();
     const pos = await posRes.json();
+    // The modal may have moved on to another stock while this was loading.
+    if (!riskTicker || riskTicker.ticker !== ticker) return;
+    if (!spend && (d.cached === false || !res.ok || d.error)) return;
     // Same cached price history, so the stop count is free once this has run.
     if (!riskStops) loadRiskStops(false);
     if (!res.ok || d.error) {
@@ -2957,7 +2965,7 @@ async function checkOverlap() {
       : `<span class="price-up">It moves largely on its own</span> relative to what you hold.`;
     // Places the stock inside the market figure shown just above, using the same measure.
     let place = "";
-    if (posRes.ok && !pos.error && lastBreadth) {
+    if (posRes.ok && !pos.error && pos.cached !== false && lastBreadth) {
       place = pos.above
         ? `<br /><span class="price-up">It is one of the ${fmtPct(
             lastBreadth.above_50d / 100
@@ -2972,11 +2980,19 @@ async function checkOverlap() {
       d.source === "recorded"
         ? " from prices this tool recorded itself"
         : " from Alpha Vantage (this tool's own recorded prices will replace it once enough days build up)";
-    slot.innerHTML = `${verdict}${place}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days${src}${
+    // Calm-day correlation is the easy test; what matters is whether it still holds up on the
+    // days your holdings fall together. Raw returns, so the market's own fall counts.
+    const dd = d.down_days;
+    const down = dd
+      ? `<br />On your holdings' ${dd.days_used} worst days (they averaged ${fmtPct(dd.portfolio_avg_pct / 100)}), it averaged ${coloredPct(
+          dd.avg_return_pct
+        )} and fell on ${dd.fell_on} of ${dd.of_days}.`
+      : "";
+    slot.innerHTML = `${verdict}${down}${place}<br /><span class="subtitle">Closest: ${top}. Based on ${d.days} shared days${src}${
       d.market_adjusted ? ", with the market's own move subtracted so this measures shared exposure rather than \"both are stocks\"" : ""
     } — a short run, and your holdings are valued in EUR while this is priced in USD, so a little currency movement leaks in.</span>`;
   } catch (e) {
-    slot.innerHTML = `<span class="subtitle">Couldn't check: ${e.message || e}</span>`;
+    if (spend) slot.innerHTML = `<span class="subtitle">Couldn't check: ${e.message || e}</span>`;
   }
 }
 

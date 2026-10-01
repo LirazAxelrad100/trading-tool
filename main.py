@@ -1551,9 +1551,11 @@ def get_breadth():
 
 
 @app.get("/api/breadth/position/{ticker}")
-def get_breadth_position(ticker: str):
+def get_breadth_position(ticker: str, cached_only: bool = False):
     """Which side of the market figure this one stock is on. Shares alpha_vantage's per-day
     cache with the overlap check, so asking for both costs one call, not two."""
+    if cached_only and not alpha_vantage.prices_cached_today(ticker.upper()):
+        return {"cached": False}
     try:
         return breadth.stock_position(ticker)
     except AlphaVantageError as e:
@@ -1571,13 +1573,15 @@ def get_stop_history(ticker: str, cached_only: bool = False):
 
 
 @app.get("/api/concentration/compare/{ticker}")
-def compare_concentration(ticker: str):
+def compare_concentration(ticker: str, cached_only: bool = False):
     """Does a candidate move with what's already held? Costs one Alpha Vantage call the
-    first time a ticker is checked on a given day, so it's triggered on demand, not on load."""
+    first time a ticker is checked on a given day, so it's triggered on demand, not on load.
+    cached_only returns {"cached": False} instead of spending it, so the Risk modal can show
+    a Check that already ran today."""
     try:
         return concentration.compare_candidate(
             ticker, active_only(load_holdings()), load_holdings_history(), load_sales_history(),
-            watchlist_history=load_watchlist_history(),
+            watchlist_history=load_watchlist_history(), cached_only=cached_only,
         )
     except AlphaVantageError as e:
         raise HTTPException(status_code=502, detail=str(e))

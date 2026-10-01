@@ -174,6 +174,20 @@ replacement.
    data. Shape: probably a line in the Sell modal before confirming, and/or a per-row action;
    decide with her. Show the price date, since a stale price makes a stale tax figure. Describes
    a hypothetical, never suggests selling.
+10. **Insider purchases as their own signal — a check that isn't an analyst.** Asked for
+   2026-10-01, after noticing that Zacks' rank and the Finnhub consensus are both built from the
+   same brokers' analysts, so more of either is not a second opinion. Finnhub's free
+   `stock/insider-transactions` is SEC Form 4 data: legally required, factual, and independent of
+   analysts. It is already fetched for Analyze, but used badly: `prices.fetch_insider_transactions()`
+   takes the 5 most recent rows, **drops `transactionCode`**, and hands them to the LLM prose
+   only. Those rows are mostly option exercises and the same-day sales of those shares (TOST,
+   checked live: 196 exercises, 55 sales, 20 grants, 6 gifts and **0 purchases** out of 279), so
+   the prose can read routine pay as "insiders selling". Wanted: a small badge in Analyze built
+   from the codes over the last 12 months: **open-market purchases (`P`)**, with how many people
+   and the amount, then sales (`S`) separately, leaving out sales on the day of an option exercise
+   by the same person. Purchases lead, because insiders sell for many reasons and buy for one.
+   Descriptive only, like `risk.py`/`momentum.py`, and kept out of `SYSTEM_PROMPT`'s scope or
+   passed with the codes, never raw. No extra calls.
 
 ### Known loose ends
 - `sectors.ticker_sector()` returns `None` for FN and INOD — not in `sp500.json` and the Finnhub
