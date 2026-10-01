@@ -30,6 +30,8 @@
         <div><label>Stop loss</label><input id="f-stop" type="text" inputmode="decimal" /></div>
         <div><label>Trailing high (optional)</label><input id="f-ref" type="text" inputmode="decimal" placeholder="defaults to buy in" /></div>
         <div><label>ISIN (optional)</label><input id="f-isin" placeholder="US0079031078" title="From Trade Republic — enables direct Lang &amp; Schwarz pricing instead of the Finnhub approximation" /></div>
+        <div><label>Broker</label><input id="f-broker" list="broker-options" value="Trade Republic" /></div>
+        <datalist id="broker-options"></datalist>
         <div>
           <label>Exit plan</label>
           <select id="f-exit-plan">
@@ -70,10 +72,41 @@
       </table>
       </div>
       <p id="empty-msg" class="empty" style="display:none;">No holdings yet — add one above.</p>
-      <p class="total-line">Total value of assets: <strong id="grand-total">0.00</strong></p>
+      <p id="active-share-classes" class="subtitle share-class-note"></p>
+      <p class="total-line"><span id="grand-total-label">Total value of assets</span>: <strong id="grand-total">0.00</strong></p>
+      <p id="everything-line" class="subtitle" style="display:none;"></p>
     </div>
 
     <div id="flags"></div>
+
+    <!-- Long-held positions she doesn't trade ("my security", to be touched last). Their own
+         percentages, no stop columns, and kept out of the value chart, the stop alerts and the
+         5% sizing — see is_old() in main.py. -->
+    <div class="panel" id="old-holdings-panel" style="display:none;">
+      <h2>Old holdings <span class="info" tabindex="0">i<span class="tooltip">Positions held for the long term and not traded. Each % is of this group only. They have no stop, and they are kept out of the value chart, the stop alerts and the Risk check's portfolio total — those measure your active holdings.</span></span></h2>
+      <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Broker</th>
+            <th>Shares</th>
+            <th>Since</th>
+            <th>Buy in</th>
+            <th>Current price</th>
+            <th>Today %</th>
+            <th>Total</th>
+            <th>% of old holdings</th>
+            <th>Zacks / Cons.</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="old-holdings-body"></tbody>
+      </table>
+      </div>
+      <p id="old-share-classes" class="subtitle share-class-note"></p>
+      <p class="total-line">Old holdings total: <strong id="old-total">0,00</strong></p>
+    </div>
 
     <!-- One panel, one view at a time. These four answer "how has it gone" rather than
          "what do I hold", they are the tallest things on the page, and they are read

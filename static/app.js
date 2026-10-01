@@ -693,7 +693,7 @@ function renderWeeklyTable(totalPoints, perStockPoints) {
   }
 
   const totalByWeek = aggregateWeekly(totalPoints);
-  const tickers = [...new Set(lastHoldings.map((h) => h.ticker))];
+  const tickers = [...new Set(activeHoldings().map((h) => h.ticker))];
   const perTickerByWeek = {};
   for (const t of tickers) {
     perTickerByWeek[t] = aggregateWeekly(perStockPoints.filter((p) => p.ticker === t));
@@ -1228,11 +1228,22 @@ function updateSortArrows() {
 }
 
 async function render() {
-  const holdings = await fetchHoldings();
-  holdings.forEach((h) => (h.total = h.shares * h.current_price));
+  const all = await fetchHoldings();
+  all.forEach((h) => (h.total = h.shares * h.current_price));
+  lastHoldings = all;
+  // Two groups, each measured against its own total, so the 5% minimum keeps meaning what it
+  // meant before the old holdings arrived. See is_old() in main.py.
+  const holdings = all.filter((h) => !isOld(h));
+  const old = all.filter(isOld);
   const grandTotal = holdings.reduce((sum, h) => sum + h.total, 0);
   holdings.forEach((h) => (h.portfolio_pct = grandTotal ? h.total / grandTotal : 0));
-  lastHoldings = holdings;
+  renderOldHoldings(old, grandTotal);
+  // Broker suggestions come from the holdings themselves rather than a list in the source —
+  // which banks she uses is personal, and this repository is public.
+  const brokers = [...new Set(all.map((h) => h.broker).filter(Boolean))].sort();
+  document.getElementById("broker-options").innerHTML = brokers
+    .map((b) => `<option value="${escapeHtml(b)}"></option>`)
+    .join("");
 
   if (sortField) {
     holdings.sort((a, b) => {
@@ -1318,6 +1329,87 @@ async function render() {
   }
 
   document.getElementById("grand-total").textContent = fmt(grandTotal);
+  document.getElementById("grand-total-label").textContent = old.length ? "Active holdings total" : "Total value of assets";
+  document.getElementById("active-share-classes").innerHTML = shareClassNote(holdings, grandTotal, "of active holdings");
+}
+
+function isOld(h) {
+  return h.group === "old";
+}
+
+// The active holdings only — what the value chart, the weekly table and the Risk check's
+// portfolio total measure.
+function activeHoldings() {
+  return (lastHoldings || []).filter((h) => !isOld(h));
+}
+
+// Two share classes of one company are one position. Alphabet A and C hold the same company
+// and move together almost exactly; listed as two rows they look like two mid-sized holdings
+// rather than one large one — the same fault Opportunities B's share-class dedupe fixes.
+function shareClassNote(list, total, ofWhat) {
+  const byCompany = {};
+  for (const h of list) (byCompany[h.company || h.ticker] ||= []).push(h);
+  return Object.entries(byCompany)
+    .filter(([, hs]) => hs.length > 1)
+    .map(([company, hs]) => {
+      const sum = hs.reduce((s, h) => s + h.total, 0);
+      return `${hs.map((h) => h.ticker).join(" and ")} are one company (${escapeHtml(company)}) — together <strong>${fmtPct(
+        total ? sum / total : 0
+      )}</strong> ${ofWhat}, ${fmt(sum)}.`;
+    })
+    .join("<br />");
+}
+
+function renderOldHoldings(old, activeTotal) {
+  const panel = document.getElementById("old-holdings-panel");
+  const everything = document.getElementById("everything-line");
+  if (!old.length) {
+    panel.style.display = "none";
+    everything.style.display = "none";
+    return;
+  }
+  const oldTotal = old.reduce((s, h) => s + h.total, 0);
+  old.forEach((h) => (h.portfolio_pct = oldTotal ? h.total / oldTotal : 0));
+  old.sort((a, b) => b.total - a.total);
+  const body = document.getElementById("old-holdings-body");
+  body.innerHTML = old
+    .map((h) => {
+      const known = h.cost_basis != null;
+      const buyIn = known
+        ? fmt(h.cost_basis)
+        : `<span class="subtitle" title="${escapeHtml(
+            h.cost_note || "The bank has no purchase price for this holding."
+          )}">unknown${h.cost_note ? " ⓘ" : ""}</span>`;
+      const gain = known ? ` <span class="subtitle">${coloredPct((h.current_price / h.cost_basis - 1) * 100)}</span>` : "";
+      return `<tr>
+        <td><span class="ticker-name" onclick="showConsensus('${h.id}')">${h.ticker}</span></td>
+        <td>${escapeHtml(h.broker || "")}</td>
+        <td>${fmtShares(h.shares)}</td>
+        <td>${fmtDate(h.purchase_date)}</td>
+        <td>${buyIn}</td>
+        <td>${fmt(h.current_price)}${h.isin ? ' <span class="subtitle" title="Priced directly from Lang &amp; Schwarz via ISIN">(LS)</span>' : ""}</td>
+        <td class="${dayChangeClass(h.day_change_pct)}">${fmtDayChangePct(h.day_change_pct)}</td>
+        <td>${fmt(h.total)}${gain}</td>
+        <td>${fmtPct(h.portfolio_pct)}</td>
+        <td>${zacksCell(h)}</td>
+        <td>
+          <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
+          <button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>
+          <button class="secondary" onclick="openThesisModal('${h.id}', 'holding')" title="${
+            h.why ? "Why you own this" : "Not written down yet"
+          }">Why${h.why ? " ✓" : ""}</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  document.getElementById("old-total").textContent = fmt(oldTotal);
+  document.getElementById("old-share-classes").innerHTML = shareClassNote(old, oldTotal, "of old holdings");
+  const all = activeTotal + oldTotal;
+  everything.innerHTML = `Everything together: <strong>${fmt(all)}</strong> — active ${fmtPct(
+    all ? activeTotal / all : 0
+  )} · old holdings ${fmtPct(all ? oldTotal / all : 0)}.`;
+  everything.style.display = "block";
+  panel.style.display = "block";
 }
 
 async function editHolding(id) {
@@ -1392,13 +1484,14 @@ async function addHolding() {
   const refRaw = document.getElementById("f-ref").value.trim();
   const isin = document.getElementById("f-isin").value.trim();
   const exit_plan = document.getElementById("f-exit-plan").value;
+  const broker = document.getElementById("f-broker").value.trim() || "Trade Republic";
 
   if (!ticker || isNaN(shares) || isNaN(cost_basis) || !purchase_date || isNaN(stop_price)) {
     alert("Fill in ticker, shares, cost basis, purchase date, and stop price.");
     return;
   }
 
-  const payload = { ticker, shares, cost_basis, purchase_date, stop_price, exit_plan };
+  const payload = { ticker, shares, cost_basis, purchase_date, stop_price, exit_plan, broker };
   if (refRaw) payload.reference_high = parseEuNumber(refRaw);
   if (isin) payload.isin = isin;
 
@@ -1563,6 +1656,8 @@ function renderFlag(id, result) {
   if (existing) existing.remove();
 
   if (result.skipped_manual) return;
+  // Old holdings carry no stop, so there is no status line to draw for them.
+  if (result.old) return;
 
   if (result.price_mismatch) {
     const m = result.price_mismatch;
@@ -2630,7 +2725,8 @@ function renderRiskPreview() {
   const atRisk = amount * (stopPct / 100);
   // The portfolio grows by whatever is invested, so the new position's share is measured
   // against the enlarged total rather than today's.
-  const portfolio = (lastHoldings || []).reduce((s, h) => s + h.shares * h.current_price, 0);
+  // Active holdings only — the 5% minimum is measured against these.
+  const portfolio = activeHoldings().reduce((s, h) => s + h.shares * h.current_price, 0);
   const enlarged = portfolio + amount;
 
   out.innerHTML = `

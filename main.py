@@ -92,6 +92,10 @@ def load_holdings() -> list[dict]:
                 "purchase_date": h["purchase_date"],
             }]
             migrated = True
+        if "broker" not in h:
+            # Every holding before 2026-10 was bought on Trade Republic.
+            h["broker"] = "Trade Republic"
+            migrated = True
     for h in holdings:
         recompute_aggregates(h)  # keep derived shares/cost_basis/purchase_date in sync with lots
     if migrated:
@@ -107,8 +111,28 @@ def recompute_aggregates(holding: dict) -> None:
     total_shares = sum(lot["shares"] for lot in lots)
     holding["shares"] = total_shares
     if total_shares > 0:
-        holding["cost_basis"] = sum(lot["shares"] * lot["cost_basis"] for lot in lots) / total_shares
+        # A lot delivered in without its purchase cost (cost_basis None) makes the whole
+        # position's cost unknown — an average over the known lots would be a made-up number.
+        if any(lot.get("cost_basis") is None for lot in lots):
+            holding["cost_basis"] = None
+        else:
+            holding["cost_basis"] = sum(lot["shares"] * lot["cost_basis"] for lot in lots) / total_shares
         holding["purchase_date"] = min(lot["purchase_date"] for lot in lots)
+
+
+# Old holdings: long-held positions she does not trade (her own words: "my security", to be
+# touched last), held at a different broker. They sit in their own group with their own
+# percentages, carry no stop, and are kept out of everything that measures her active
+# decisions — the value chart, the cash-flow markers, the stop alerts, the 5% sizing rule —
+# because adding them would otherwise read as a jump in performance and halve every active
+# position's share overnight. They are still priced daily and still recorded per ticker, so
+# they can join the move-together view later.
+def is_old(holding: dict) -> bool:
+    return holding.get("group") == "old"
+
+
+def active_only(holdings: list) -> list:
+    return [h for h in holdings if not is_old(h)]
 
 
 def save_holdings(holdings: list[dict]) -> None:
@@ -138,8 +162,10 @@ def save_portfolio_history(points: list[dict]) -> None:
 
 def record_portfolio_snapshot(holdings: list[dict]) -> None:
     """Upsert today's total portfolio value (shares × current_price, summed) into the
-    history — one point per day, overwriting an earlier same-day refresh."""
-    total = sum(h["shares"] * h["current_price"] for h in holdings)
+    history — one point per day, overwriting an earlier same-day refresh. Active holdings
+    only: the chart measures her active decisions, and old holdings joining it would read
+    as a gain on the day they were added."""
+    total = sum(h["shares"] * h["current_price"] for h in active_only(holdings))
     if total <= 0:
         return
     today = date.today().isoformat()
@@ -242,14 +268,21 @@ def record_watchlist_snapshot(items: list[dict]) -> None:
 class HoldingIn(BaseModel):
     ticker: str
     shares: float
-    cost_basis: float
+    # None = purchase cost unknown (an old holding delivered in without it).
+    cost_basis: Optional[float] = None
     purchase_date: str
-    stop_price: float
+    # Required for active holdings; old holdings carry no stop.
+    stop_price: Optional[float] = None
     reference_high: Optional[float] = None
     trailing_pct: Optional[float] = None
     current_price: Optional[float] = None
     exit_plan: ExitPlan = "hold"
     isin: Optional[str] = None
+    broker: Optional[str] = None
+    group: Optional[Literal["active", "old"]] = None
+    # Free text for a cost the bank doesn't have, e.g. her own memory of what she paid —
+    # shown labelled as hers, never used in arithmetic.
+    cost_note: Optional[str] = None
 
 
 class ThesisIn(BaseModel):
@@ -268,6 +301,7 @@ class HoldingUpdate(BaseModel):
     exit_plan: Optional[ExitPlan] = None
     manual_price: Optional[bool] = None
     isin: Optional[str] = None
+    broker: Optional[str] = None
 
 
 class LotIn(BaseModel):
@@ -317,20 +351,43 @@ def find_holding(holdings: list[dict], holding_id: str) -> dict:
 @app.get("/api/holdings")
 def list_holdings():
     holdings = load_holdings()
+    universe = opportunities_b.load_universe()
     for h in holdings:
         h.update(consensus_store.overlay_consensus(h["ticker"]))
         h.update(zacks_import.overlay_growth(h["ticker"]))
+        h["company"] = company_of(h["ticker"], universe)
     return holdings
+
+
+def company_of(ticker: str, universe: dict) -> str:
+    """The company behind a ticker, with any share-class suffix removed, so two classes of
+    one company (GOOGL and GOOG) can be shown as the single position they are. Uses the
+    same suffix rule as Opportunities B's share-class dedupe; a ticker outside the S&P 500
+    file is its own company."""
+    entry = universe.get(ticker.upper())
+    if not entry:
+        return ticker.upper()
+    return opportunities_b.SHARE_CLASS_SUFFIX.sub("", entry["company"]).strip()
 
 
 @app.post("/api/holdings")
 def create_holding(holding: HoldingIn):
     holdings = load_holdings()
-    reference_high = holding.reference_high if holding.reference_high is not None else holding.cost_basis
-    if holding.trailing_pct is not None:
-        trailing_pct = holding.trailing_pct
+    old = holding.group == "old"
+    if old:
+        # No stop, no trailing high: these are not traded on a stop.
+        reference_high = None
+        trailing_pct = None
+        if holding.current_price is None:
+            raise HTTPException(status_code=422, detail="An old holding needs a current price to start from.")
     else:
-        trailing_pct = (reference_high - holding.stop_price) / reference_high
+        if holding.stop_price is None or holding.cost_basis is None:
+            raise HTTPException(status_code=422, detail="A stop loss and a buy-in price are required.")
+        reference_high = holding.reference_high if holding.reference_high is not None else holding.cost_basis
+        if holding.trailing_pct is not None:
+            trailing_pct = holding.trailing_pct
+        else:
+            trailing_pct = (reference_high - holding.stop_price) / reference_high
 
     new_holding = {
         "id": str(uuid.uuid4()),
@@ -352,7 +409,13 @@ def create_holding(holding: HoldingIn):
         "day_change_pct": None,
         "manual_price": False,
         "isin": holding.isin.strip().upper() if holding.isin else None,
+        "broker": (holding.broker or "Trade Republic").strip(),
     }
+    if old:
+        new_holding["group"] = "old"
+        new_holding["stop_price"] = None
+    if holding.cost_note:
+        new_holding["cost_note"] = holding.cost_note.strip()
     recompute_aggregates(new_holding)
     holdings.append(new_holding)
     save_holdings(holdings)
@@ -434,7 +497,8 @@ def update_holding(holding_id: str, update: HoldingUpdate):
         holding.pop("anchor_previous_close_usd", None)
 
     recompute_aggregates(holding)
-    holding["trailing_pct"] = (holding["reference_high"] - holding["stop_price"]) / holding["reference_high"]
+    if holding.get("stop_price") is not None and holding.get("reference_high"):
+        holding["trailing_pct"] = (holding["reference_high"] - holding["stop_price"]) / holding["reference_high"]
     save_holdings(holdings)
     return holding
 
@@ -448,6 +512,15 @@ def sell_holding(holding_id: str, sell: SellRequest):
         raise HTTPException(
             status_code=422,
             detail="Shares sold must be greater than 0 and cannot exceed the holding's shares.",
+        )
+
+    if any(lot.get("cost_basis") is None for lot in holding.get("lots") or []):
+        # The realised gain can't be computed without a purchase cost, and the bank taxes
+        # such a sale on a substitute basis (30% of proceeds) that this tool doesn't model
+        # yet. Refuse rather than record a gain that is made up.
+        raise HTTPException(
+            status_code=422,
+            detail="This holding's purchase price is unknown, so the sale can't be recorded here yet.",
         )
 
     sale_price = sell.total_sum / sell.shares_sold
@@ -911,6 +984,18 @@ def refresh_all_watchlist():
 
 
 def evaluate_trailing(holding: dict, current_price: float) -> dict:
+    if is_old(holding) or holding.get("stop_price") is None:
+        # No stop to evaluate — an old holding is never flagged, and the frontend draws no
+        # status line for it. Same keys the daily check reads, so it needs no special case.
+        return {
+            "id": holding["id"],
+            "ticker": holding["ticker"],
+            "old": True,
+            "stop_hit": False,
+            "triggered": False,
+            "new_price": current_price,
+            "day_change_pct": holding.get("day_change_pct"),
+        }
     reference_high = holding["reference_high"]
     stop_price = holding["stop_price"]
 
@@ -1362,7 +1447,7 @@ def get_portfolio_history():
     caused and read it as a gain — the same fault concentration.py guards with
     `_changed_dates()`. Overlaid at read time rather than stored, so it stays correct when a
     lot or a sale is corrected afterwards."""
-    return cash_flow.overlay(load_portfolio_history(), load_holdings(), load_sales_history())
+    return cash_flow.overlay(load_portfolio_history(), active_only(load_holdings()), load_sales_history())
 
 
 @app.get("/api/holdings-history")
@@ -1422,7 +1507,7 @@ def compare_concentration(ticker: str):
     first time a ticker is checked on a given day, so it's triggered on demand, not on load."""
     try:
         return concentration.compare_candidate(
-            ticker, load_holdings(), load_holdings_history(), load_sales_history(),
+            ticker, active_only(load_holdings()), load_holdings_history(), load_sales_history(),
             watchlist_history=load_watchlist_history(),
         )
     except AlphaVantageError as e:
@@ -1432,7 +1517,9 @@ def compare_concentration(ticker: str):
 @app.get("/api/concentration")
 def get_concentration():
     """Which holdings move together. Reads only stored history, so it costs no API calls."""
-    return concentration.analyze(load_holdings(), load_holdings_history(), load_sales_history())
+    # Active only for now — old holdings join once they have enough recorded days, which
+    # needs its own decision about the denominator. See is_old().
+    return concentration.analyze(active_only(load_holdings()), load_holdings_history(), load_sales_history())
 
 
 @app.post("/api/portfolio-history/seed")
@@ -1442,7 +1529,7 @@ def seed_portfolio_history():
     the daily recorded points accumulate. Approximate because it applies *today's*
     share counts and FX rate to past prices (ignores past buys/sells). Fills only dates
     not already recorded, so real snapshots always win."""
-    holdings = load_holdings()
+    holdings = active_only(load_holdings())  # the chart is active holdings only
     try:
         rate = prices.fetch_usd_to_eur_rate()
     except PriceError as e:
