@@ -318,7 +318,8 @@ td.nowrap { white-space: nowrap; }
 /* Pre-buy checklist. */
 .checklist-heading { margin: 1.1rem 0 0.3rem; font-size: 0.95rem; }
 .checklist-q { display: block; margin: 0.7rem 0 0.25rem; font-size: 0.88rem; color: var(--text, #dfe3ee); }
-#risk-modal textarea {
+#risk-modal textarea,
+#old-holdings-body textarea {
   width: 100%; box-sizing: border-box;
   background: var(--panel-2, #1b1f2a); border: 1px solid var(--border, #2a3040);
   color: var(--text, #dfe3ee); border-radius: 6px; padding: 8px 10px;

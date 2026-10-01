@@ -1360,6 +1360,116 @@ function shareClassNote(list, total, ofWhat) {
     .join("<br />");
 }
 
+// Old holdings get their own edit row: the main table's Edit is built around the stop and
+// trailing-high fields these don't have. Buy-in left empty means unknown, which is the
+// honest state for shares delivered in without a purchase price.
+let oldEditingId = null;
+
+function oldEditRow(h) {
+  return `<tr>
+    <td>${h.ticker}</td>
+    <td><input id="o-broker-${h.id}" list="broker-options" value="${escapeHtml(h.broker || "")}" /></td>
+    <td><input id="o-shares-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.shares)}" /></td>
+    <td><input id="o-date-${h.id}" type="date" value="${h.purchase_date}" /></td>
+    <td><input id="o-cost-${h.id}" type="text" inputmode="decimal" placeholder="unknown" value="${
+      h.cost_basis != null ? toEuInput(h.cost_basis) : ""
+    }" /></td>
+    <td colspan="5">
+      <input id="o-isin-${h.id}" placeholder="ISIN" value="${escapeHtml(h.isin || "")}" style="width:100%; margin-bottom:0.25rem;" />
+      <textarea id="o-note-${h.id}" rows="2" placeholder="Note about the purchase price (shown on hover)" style="width:100%;">${escapeHtml(
+        h.cost_note || ""
+      )}</textarea>
+    </td>
+    <td>
+      <button onclick="saveOldHolding('${h.id}')">Save</button>
+      <button class="secondary" onclick="cancelOldEdit()">Cancel</button>
+    </td>
+  </tr>`;
+}
+
+async function editOldHolding(id) {
+  oldEditingId = id;
+  await render();
+}
+
+async function cancelOldEdit() {
+  oldEditingId = null;
+  await render();
+}
+
+async function saveOldHolding(id) {
+  const shares = parseEuNumber(document.getElementById(`o-shares-${id}`).value);
+  const costRaw = document.getElementById(`o-cost-${id}`).value.trim();
+  const cost_basis = costRaw ? parseEuNumber(costRaw) : null;
+  const purchase_date = document.getElementById(`o-date-${id}`).value;
+  if (isNaN(shares) || shares <= 0 || !purchase_date || (costRaw && (isNaN(cost_basis) || cost_basis < 0))) {
+    alert("Shares and the date are needed; leave Buy in empty if the price is unknown.");
+    return;
+  }
+  const res = await fetch(`${API}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      shares,
+      cost_basis,
+      purchase_date,
+      broker: document.getElementById(`o-broker-${id}`).value.trim(),
+      isin: document.getElementById(`o-isin-${id}`).value.trim() || null,
+      cost_note: document.getElementById(`o-note-${id}`).value.trim(),
+    }),
+  });
+  if (!res.ok) {
+    alert((await res.json()).detail || "Could not save.");
+    return;
+  }
+  oldEditingId = null;
+  await render();
+}
+
+// Answers "is this really a cushion?" for each old company: does it move with the active
+// holdings, and what did it do on their worst days. One line per company, since GOOGL and
+// GOOG are one. Descriptive only — it says how they have behaved, not what to hold.
+async function checkOldVsActive() {
+  const host = document.getElementById("old-vs-active");
+  host.innerHTML = `<p class="subtitle">Checking… (a few seconds — Alpha Vantage allows one call per second)</p>`;
+  try {
+    const res = await fetch("/api/concentration/old");
+    const rows = await res.json();
+    if (!res.ok) throw new Error(rows.detail || "failed");
+    const lines = rows.map((r) => {
+      const name = `<strong>${escapeHtml(r.company)}</strong> <span class="subtitle">(${r.tickers.join(" + ")})</span>`;
+      if (r.error) return `<li>${name}: <span class="subtitle">couldn't check — ${escapeHtml(r.error)}</span></li>`;
+      const top = r.pairs[0];
+      const verdict = r.joins_group
+        ? `<span class="price-down">moves with your ${r.joins_group.join(" · ")} bloc</span>`
+        : top && top.correlation >= 0.35
+        ? `leans towards ${top.ticker} (${fmt(top.correlation)}) without clearly joining it`
+        : `<span class="price-up">moves largely on its own</span> relative to your active holdings`;
+      const against = r.pairs.filter((p) => p.correlation <= -0.35).map((p) => `${p.ticker} ${fmt(p.correlation)}`);
+      const opposite = against.length ? ` It tends to move <em>against</em> ${against.join(" · ")}.` : "";
+      const d = r.down_days;
+      const down = d
+        ? ` On your active holdings' ${d.days_used} worst days (they averaged ${fmtPct(d.portfolio_avg_pct / 100)}), it averaged ${coloredPct(
+            d.avg_return_pct
+          )} and fell on ${d.fell_on} of ${d.of_days}.`
+        : "";
+      return `<li>${name}: ${verdict}.${opposite}${down}</li>`;
+    });
+    const any = rows.find((r) => r.days);
+    const compared = new Set(((any && any.pairs) || []).map((p) => p.ticker));
+    const missing = activeHoldings().map((h) => h.ticker).filter((t) => !compared.has(t));
+    const src = rows.some((r) => r.source === "alpha vantage")
+      ? "Alpha Vantage price history (the tool's own record takes over once enough days build up)"
+      : "the tool's own recorded prices";
+    host.innerHTML = `<ul class="checklist-context">${lines.join("")}</ul>
+      <p class="subtitle">Based on ${any ? any.days : "—"} shared days, from ${src}, with the market's own move taken out so this measures shared exposure rather than "both are stocks". A short run — read it as a tendency, not a fact.${
+        missing.length ? ` Not compared yet, too few days recorded: ${missing.join(" · ")}.` : ""
+      }</p>`;
+  } catch (e) {
+    host.innerHTML = `<p class="subtitle">Couldn't check: ${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
 function renderOldHoldings(old, activeTotal) {
   const panel = document.getElementById("old-holdings-panel");
   const everything = document.getElementById("everything-line");
@@ -1374,6 +1484,7 @@ function renderOldHoldings(old, activeTotal) {
   const body = document.getElementById("old-holdings-body");
   body.innerHTML = old
     .map((h) => {
+      if (h.id === oldEditingId) return oldEditRow(h);
       const known = h.cost_basis != null;
       const buyIn = known
         ? fmt(h.cost_basis)
@@ -1398,6 +1509,7 @@ function renderOldHoldings(old, activeTotal) {
           <button class="secondary" onclick="openThesisModal('${h.id}', 'holding')" title="${
             h.why ? "Why you own this" : "Not written down yet"
           }">Why${h.why ? " ✓" : ""}</button>
+          <button class="secondary" onclick="editOldHolding('${h.id}')">Edit</button>
         </td>
       </tr>`;
     })

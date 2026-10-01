@@ -302,6 +302,7 @@ class HoldingUpdate(BaseModel):
     manual_price: Optional[bool] = None
     isin: Optional[str] = None
     broker: Optional[str] = None
+    cost_note: Optional[str] = None
 
 
 class LotIn(BaseModel):
@@ -1512,6 +1513,42 @@ def compare_concentration(ticker: str):
         )
     except AlphaVantageError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/concentration/old")
+def compare_old_holdings():
+    """Do the old holdings move with the active ones, and how do they behave on the active
+    holdings' worst days? One comparison per company (GOOGL and GOOG are one), each run the
+    way the watch list's Check runs a candidate. They have only been recorded since
+    2026-10-01, so until enough days build up each comparison reads Alpha Vantage — up to one
+    call per company the first time each day — and then switches to the recorded series."""
+    holdings = load_holdings()
+    active = active_only(holdings)
+    history = load_holdings_history()
+    sales = load_sales_history()
+    universe = opportunities_b.load_universe()
+    # The old holdings' recorded values, shaped like watch-list price points. Shares don't
+    # change for these, so value moves exactly with price and the returns are the same.
+    recorded = [
+        {"date": p["date"], "ticker": p["ticker"], "price": p["value"]}
+        for p in history
+        if any(h["ticker"] == p["ticker"] for h in holdings if is_old(h))
+    ]
+    seen, results = set(), []
+    for h in sorted((h for h in holdings if is_old(h)), key=lambda h: -h["shares"] * h["current_price"]):
+        company = company_of(h["ticker"], universe)
+        if company in seen:
+            continue
+        seen.add(company)
+        tickers = [x["ticker"] for x in holdings if is_old(x) and company_of(x["ticker"], universe) == company]
+        if results and results[-1].get("source") == "alpha vantage":
+            time.sleep(1.5)  # Alpha Vantage's free key also caps bursts at one call per second
+        try:
+            result = concentration.compare_candidate(h["ticker"], active, history, sales, watchlist_history=recorded)
+        except AlphaVantageError as e:
+            result = {"error": str(e)}
+        results.append({"company": company, "tickers": tickers, **result})
+    return results
 
 
 @app.get("/api/concentration")

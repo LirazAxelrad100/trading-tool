@@ -295,6 +295,7 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     # Masked rather than filtered, so it stays index-aligned with the holdings' own series —
     # a silently dropped day would shift every comparison by one.
     candidate = _masked_returns([closes[d] for d in shared], [False] * len(shared))
+    raw_candidate = list(candidate)  # before the market adjustment, for the down-day reading
     # Subtract the market's own move from every series. Raw correlation over a few weeks is
     # inflated by the fact that most stocks fall on the days the market falls, so a candidate
     # can score ~0.5 against a bloc simply for being a normal risky US stock. Measured live
@@ -313,8 +314,9 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
 
     sales = sales or []
 
+    raw_series = _series_by_ticker(holdings, by_ticker, sales, shared)
     pairs = []
-    for other, series in sorted(_series_by_ticker(holdings, by_ticker, sales, shared).items()):
+    for other, series in sorted(raw_series.items()):
         if market_returns:
             series = [
                 r - m if r is not None else None
@@ -343,6 +345,40 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
         "joins_group_weight_pct": joins["weight_pct"] if joins else None,
         "market_adjusted": bool(market_returns),
         "source": source,
+        "down_days": _candidate_down_days(raw_candidate, raw_series, holdings),
+    }
+
+
+def _candidate_down_days(candidate: list, series_by_ticker: dict, holdings: list) -> Optional[dict]:
+    """What the candidate did on the holdings' worst days. Correlation over calm days is the
+    wrong test of a cushion — the question for something held as security is whether it
+    still holds up on the days everything else falls. Raw returns, not market-adjusted: on a
+    bad day the market's own fall is exactly what a cushion has to withstand.
+
+    The holdings' daily return is the same weight-weighted mean analyze() uses, over the
+    holdings with a clean number that day."""
+    total = sum(h["shares"] * h["current_price"] for h in holdings) or 1
+    weights = {h["ticker"]: h["shares"] * h["current_price"] / total for h in holdings}
+    portfolio = []
+    for i in range(len(candidate)):
+        parts = [(weights.get(t, 0), s[i]) for t, s in series_by_ticker.items() if i < len(s) and s[i] is not None]
+        carried = sum(w for w, _ in parts)
+        portfolio.append(sum(w * r for w, r in parts) / carried if carried else None)
+
+    days = [i for i, r in enumerate(portfolio) if r is not None and candidate[i] is not None]
+    if len(days) < MIN_WORST_DAYS * 2:
+        return None
+    count = max(MIN_WORST_DAYS, int(len(days) * WORST_DAY_SHARE))
+    worst = sorted(days, key=lambda i: portfolio[i])[:count]
+    if all(portfolio[i] >= 0 for i in worst):
+        return None
+    picked = [candidate[i] for i in worst]
+    return {
+        "days_used": count,
+        "portfolio_avg_pct": statistics.mean(portfolio[i] for i in worst) * 100,
+        "avg_return_pct": statistics.mean(picked) * 100,
+        "fell_on": sum(1 for r in picked if r < 0),
+        "of_days": len(picked),
     }
 
 
