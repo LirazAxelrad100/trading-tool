@@ -188,6 +188,17 @@ replacement.
    by the same person. Purchases lead, because insiders sell for many reasons and buy for one.
    Descriptive only, like `risk.py`/`momentum.py`, and kept out of `SYSTEM_PROMPT`'s scope or
    passed with the codes, never raw. No extra calls.
+   **The same TOST case showed both failure modes, and why the codes matter.** The Analyze prose
+   said the CFO had been "selling massively since August" while the stock climbed, and nothing
+   flagged it as a tension. Summed by person from 01.08 (filings up to 02.09): the large seller
+   was not the CFO. The biggest was another insider: 300.000 shares (~$10,6 m), **not** tied to an
+   option exercise, so a real sale. One person's 146.000 shares were all same-day sales of
+   exercised options (pay), the CFO sold 25.000 (~$0,9 m), and nobody bought. So the prose got the
+   person and the size wrong, and the one sale worth noticing went unflagged. A tension rule in
+   `derive_signals()` belongs with the badge: large sales **not** linked to an exercise, no
+   purchases, against bullish ratings. It should be worded as a tension, not a verdict, since
+   founders sell for diversification and often on a pre-set schedule (10b5-1). Finnhub's free
+   data gives neither job titles nor the 10b5-1 flag, so the badge can name people but not roles.
 
 ### Known loose ends
 - `sectors.ticker_sector()` returns `None` for FN and INOD — not in `sp500.json` and the Finnhub
