@@ -2871,14 +2871,11 @@ function openRiskModal(id) {
   if (!w || w.current_price == null) return;
   riskTicker = w;
   document.getElementById("risk-modal-title").textContent = `${w.ticker} — before you buy`;
-  document.getElementById("risk-stop-hint").textContent = "% below your buy price — 10% on most of yours, ~22% on MU and NBIS";
-  document.getElementById("risk-amount").value = "";
-  document.getElementById("risk-stop").value = "10";
   document.getElementById("risk-why").value = w.why || "";
   document.getElementById("risk-tradeoff").value = w.tradeoff || "";
   document.getElementById("risk-drawdown").value = w.drawdown || "";
   riskStops = null;
-  renderRiskPreview();
+  renderRiskStops();
   renderRiskContext();
   loadRiskStops(false);
   checkOverlap(false);
@@ -2888,8 +2885,8 @@ function openRiskModal(id) {
 
 // How often a trailing stop of each width would have sold this stock recently. Came out of
 // HPE (2026-08): a default 10% stop fired five days after buying, on a stock whose ordinary
-// week moves about that much. Shown next to the stop field so the width is chosen knowing how
-// this stock behaves — a description, not a suggested level.
+// week moves about that much. Filled by the overlap Check (same cached prices), so the width is
+// chosen knowing how this stock behaves — a description, not a suggested level.
 let riskStops = null;
 
 async function loadRiskStops(spend) {
@@ -2916,15 +2913,11 @@ function renderRiskStops() {
   const host = document.getElementById("risk-stops");
   if (!host || !riskTicker) return;
   if (!riskStops) {
-    host.innerHTML = `<p class="subtitle">How often would a stop have sold this recently? <button class="secondary" onclick="loadRiskStops(true)">Check</button> uses one Alpha Vantage call the first time each day</p>`;
+    host.innerHTML = "";
     return;
   }
-  const typed = parseEuNumber(document.getElementById("risk-stop").value);
   const times = (n) => (n === 0 ? "never" : n === 1 ? "once" : `${n} times`);
-  const parts = Object.entries(riskStops.fires).map(([w, n]) => {
-    const text = `${w}% — ${times(n)}`;
-    return Number(w) === typed ? `<strong>${text}</strong>` : text;
-  });
+  const parts = Object.entries(riskStops.fires).map(([w, n]) => `${w}% — ${times(n)}`);
   const movesLine = riskStops.typical_moves
     ? typicalMovesText(riskStops.typical_moves)
     : `On a typical day it moves ${fmtPct(riskStops.typical_daily_move_pct / 100)}.`;
@@ -2936,37 +2929,6 @@ function renderRiskStops() {
 function closeRiskModal() {
   document.getElementById("risk-modal").style.display = "none";
   riskTicker = null;
-}
-
-function renderRiskPreview() {
-  const out = document.getElementById("risk-output");
-  if (!riskTicker) return;
-  if (riskStops) renderRiskStops();
-  const amount = parseEuNumber(document.getElementById("risk-amount").value);
-  const stopPct = parseEuNumber(document.getElementById("risk-stop").value);
-  if (isNaN(amount) || amount <= 0 || isNaN(stopPct) || stopPct <= 0 || stopPct >= 100) {
-    out.innerHTML = `<p class="subtitle">Enter an amount to see the numbers.</p>`;
-    return;
-  }
-  const price = riskTicker.current_price;
-  const shares = amount / price;
-  const atRisk = amount * (stopPct / 100);
-  // The portfolio grows by whatever is invested, so the new position's share is measured
-  // against the enlarged total rather than today's.
-  // Active holdings only — the 5% minimum is measured against these.
-  const portfolio = activeHoldings().reduce((s, h) => s + h.shares * h.current_price, 0);
-  const enlarged = portfolio + amount;
-
-  out.innerHTML = `
-    <table class="mini-table"><tbody>
-      <tr><td>Buys</td><td><strong>${fmt(shares)}</strong> shares at ${fmt(price)}</td></tr>
-      <tr><td>Position size</td><td><strong>${fmtPct(amount / enlarged)}</strong> of your portfolio afterwards</td></tr>
-      <tr><td>Stop at</td><td>${fmt(price * (1 - stopPct / 100))}</td></tr>
-      <tr><td>If the stop is hit</td><td><span class="price-down">−${fmt(atRisk)}</span> — ${fmtPct(
-    atRisk / enlarged
-  )} of the portfolio</td></tr>
-    </tbody></table>
-    <p class="subtitle">A stop doesn't guarantee that exit price — a gap down opens below it, and the loss is whatever you actually sell at. Your broker's live order is the real protection; this tool only tracks the level.</p>`;
 }
 
 // The static half of the pre-buy checklist. These three questions don't change per stock —
@@ -3038,7 +3000,7 @@ function renderRiskContext() {
     );
   }
   bits.push(
-    `<li id="overlap-slot">Where does it sit — rising or falling, and does it move with what you already hold? <button class="secondary" onclick="checkOverlap()">Check</button> <span class="subtitle">uses one Alpha Vantage call the first time each day</span></li>`
+    `<li id="overlap-slot">Where does it sit, does it move with what you already hold, and how often would a stop have sold it? <button class="secondary" onclick="checkOverlap()">Check</button> <span class="subtitle">uses one Alpha Vantage call the first time each day</span></li>`
   );
   host.innerHTML = `<ul class="checklist-context">${bits.join("")}</ul>`;
 }

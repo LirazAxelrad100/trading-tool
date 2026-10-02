@@ -321,17 +321,9 @@
         <button class="secondary" onclick="closeRiskModal()">Close</button>
       </div>
 
-      <h3 class="checklist-heading">What it would put at stake</h3>
-      <p class="subtitle">Arithmetic only — it doesn't suggest an amount.</p>
-      <div class="add-form">
-        <div><label>Amount to invest (EUR)</label><input id="risk-amount" type="text" inputmode="decimal" placeholder="5.000" oninput="renderRiskPreview()" /></div>
-        <div><label>Stop <span id="risk-stop-hint" class="subtitle"></span></label><input id="risk-stop" type="text" inputmode="decimal" value="10" oninput="renderRiskPreview()" /></div>
-      </div>
-      <div id="risk-output"></div>
-      <div id="risk-stops"></div>
-
       <h3 class="checklist-heading">What the tool already knows</h3>
       <div id="risk-context"></div>
+      <div id="risk-stops"></div>
 
       <h3 class="checklist-heading">What only you can answer</h3>
       <p class="subtitle">The same three questions every time. Saved onto this watch-list item, and carried across if you buy it.</p>
@@ -340,7 +332,7 @@
       <label class="checklist-q">What are you giving up to fund it — cash you'd wanted elsewhere, or another position?</label>
       <textarea id="risk-tradeoff" rows="2" placeholder="Optional. Money spent here isn't available for something else."></textarea>
       <label class="checklist-q">How would you feel holding this through another summer like the last one?</label>
-      <textarea id="risk-drawdown" rows="2" placeholder="Optional. The numbers above assume you actually hold to the stop."></textarea>
+      <textarea id="risk-drawdown" rows="2" placeholder="Optional. A stop only protects you if you actually hold until it's hit."></textarea>
       <div class="add-form" style="margin-top:0.6rem"><button onclick="saveChecklist()">Save answers</button></div>
     </div>
   </div>
