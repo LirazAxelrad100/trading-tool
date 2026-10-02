@@ -1211,59 +1211,89 @@ async function loadInsiders(ticker) {
   slot.outerHTML = renderInsiders(r);
 }
 
-function usdShort(v) {
-  if (v >= 1e6) return `$${euDec1.format(v / 1e6)} m`;
-  if (v >= 1e3) return `$${euIntFormat.format(Math.round(v / 1e3))} k`;
+// Dollars in words, for a reader who isn't a trader: "$1,5 billion", "$44,3 million".
+function usdWords(v) {
+  if (v >= 1e9) return `$${euDec1.format(v / 1e9)} billion`;
+  if (v >= 1e8) return `$${euIntFormat.format(Math.round(v / 1e6))} million`;
+  if (v >= 1e6) return `$${euDec1.format(v / 1e6)} million`;
+  if (v >= 1e3) return `$${euIntFormat.format(Math.round(v / 1e3))} thousand`;
   return `$${euIntFormat.format(Math.round(v))}`;
 }
 
-// What the people running the company did with their own shares. Purchases lead: insiders sell
-// for many reasons and buy for one. Sales are split by whether the timing was theirs — a sale
-// set months ahead in a 10b5-1 plan, or sold automatically to pay tax on vesting stock, says
-// little about today. See insiders.py.
-// Colour follows signal strength, strongest first: buying green; own-timing sales amber, or rust
-// when the reasons that strengthen them stack up (two or more sellers, a C-level among them,
-// and nobody buying); planned and tax sales plain, since they say nothing about today.
+// SEC files names surname first in capitals ("STEVENS MARK A"); show them as people write them.
+function personName(raw) {
+  const parts = (raw || "").split(/\s+/).filter(Boolean);
+  if (parts.length < 2 || parts.length > 4 || /[0-9&,]|LLC|L\.P|TRUST|FUND|INC/i.test(raw)) return raw;
+  const word = (w) => (w.length <= 2 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  const cap = (w) => w.split("-").map(word).join("-");
+  return `${cap(parts[1])} ${cap(parts[0])}`;
+}
+
+function personRole(title) {
+  if (!title) return "";
+  return /^director$/i.test(title) ? "board member" : title;
+}
+
+// What the people running the company did with their own shares (SEC Form 4, see insiders.py).
+// Written for a reader who isn't a trader (2026-10-02): one plain point first, then one line per
+// kind of trade with what it means, and the people on their own lines — names run into a
+// sentence after "Sold" were unreadable. Colour follows signal strength: buying green; sales the
+// insider chose to make amber, or rust when they stack up (two or more sellers, a C-level among
+// them, nobody buying); planned and tax sales plain, since they say little about today.
 const SENIOR_TITLE = /\b(CEO|CFO|COO|Chief|President)\b/i;
 
 function renderInsiders(r) {
   if (!r || r.error) return "";
-  const who = (p) => `${escapeHtml(p.name)}${p.title ? ` (${escapeHtml(p.title)})` : ""} ${usdShort(p.value)}`;
-  const bought = r.bought.length
-    ? `<p><strong class="sig-pos" title="Insiders buy with their own money for one reason: they think the shares are worth more. The strongest signal.">Bought on the market: ${usdShort(
-        r.bought_value
-      )}</strong> — ${r.bought.map(who).join(", ")}.</p>`
-    : `<p class="sig-none">No insider bought shares on the market.</p>`;
-  let sold = `<p class="sig-none">No insider sold shares.</p>`;
-  if (r.sold_value > 0) {
-    const s = r.sold;
-    const plain = (text, why) => `<span class="sig-none" title="${why}">${text}</span>`;
-    const parts = [];
-    if (s.scheduled > 0)
-      parts.push(plain(`${usdShort(s.scheduled)} set months ahead in a trading plan`, "Decided months ago: says almost nothing about today."));
-    if (s.tax > 0)
-      parts.push(plain(`${usdShort(s.tax)} sold automatically to pay tax on stock pay`, "Automatic, nobody decided anything: no signal."));
-    const strong =
-      !r.bought.length && r.own_timing.length >= 2 && r.own_timing.some((p) => SENIOR_TITLE.test(p.title || ""));
-    const cls = strong ? "sig-neg" : "sig-mid";
-    const why = strong
-      ? "Several insiders, a C-level among them, chose to sell while nobody bought: the strongest form a sale takes. Still not proof: people sell for tax, diversification, a house."
-      : "They chose the timing. A weak signal on its own: people sell for many reasons.";
-    const how = r.own_timing_from_options > s.own_timing / 2 ? ", mostly by exercising options and selling at once" : "";
-    const names = r.own_timing.map(who).join(", ");
-    if (!parts.length) {
-      sold = `<p><strong class="${cls}" title="${why}">Sold ${usdShort(r.sold_value)}, all at their own timing</strong>${how} — ${names}.</p>`;
-    } else {
-      const own = s.own_timing > 0
-        ? `<strong class="${cls}" title="${why}">${usdShort(s.own_timing)} at their own timing</strong>${how} — ${names}.`
-        : `none at their own timing.`;
-      sold = `<p><strong class="sig-none">Sold ${usdShort(r.sold_value)}:</strong> ${parts.join(", ")}; ${own}</p>`;
-    }
+  const s = r.sold;
+  const people = (list) =>
+    `<ul class="insider-people">${list
+      .map((p) => `<li>${escapeHtml(personName(p.name))}${p.title ? `, ${escapeHtml(personRole(p.title))}` : ""} — ${usdWords(p.value)}</li>`)
+      .join("")}</ul>`;
+  const strong = !r.bought.length && r.own_timing.length >= 2 && r.own_timing.some((p) => SENIOR_TITLE.test(p.title || ""));
+
+  let point, pointCls;
+  if (r.bought.length && s.own_timing > 0) {
+    point = "Insiders both bought and sold. The buying is the stronger sign.";
+    pointCls = "sig-pos";
+  } else if (r.bought.length) {
+    point = "An insider bought shares with their own money: a good sign.";
+    pointCls = "sig-pos";
+  } else if (strong) {
+    point = "Several top people chose to sell, and nobody bought. Worth a closer look.";
+    pointCls = "sig-neg";
+  } else if (s.own_timing > 0) {
+    point = "Some insiders chose to sell, and nobody bought. On its own, a weak warning.";
+    pointCls = "sig-mid";
+  } else if (r.sold_value > 0) {
+    point = "Nothing to read here: every sale was planned months ahead or paid tax.";
+    pointCls = "sig-none";
+  } else {
+    point = "No insider bought or sold shares.";
+    pointCls = "sig-none";
   }
+
+  const lines = [];
+  lines.push(
+    r.bought.length
+      ? `<li><strong class="sig-pos">Bought with their own money: ${usdWords(r.bought_value)}</strong>${people(r.bought)}</li>`
+      : `<li class="sig-none">Bought with their own money: nobody.</li>`
+  );
+  if (s.own_timing > 0) {
+    const how = r.own_timing_from_options > s.own_timing / 2 ? " Mostly by cashing in stock options." : "";
+    lines.push(
+      `<li><strong class="${strong ? "sig-neg" : "sig-mid"}">Sold when they chose to: ${usdWords(s.own_timing)}</strong>${how}${people(r.own_timing)}</li>`
+    );
+  }
+  if (s.scheduled > 0)
+    lines.push(`<li class="sig-none">Sold on a schedule they fixed months ago: ${usdWords(s.scheduled)}. Says little about today.</li>`);
+  if (s.tax > 0)
+    lines.push(`<li class="sig-none">Sold automatically to pay tax on shares they got as pay: ${usdWords(s.tax)}. No meaning.</li>`);
+
   return `<div class="tensions">
-      <strong>Insiders, last 12 months</strong>
-      ${bought}${sold}
-      <p class="subtitle">From ${r.filings} SEC filings (Form 4), in dollars.</p>
+      <strong>Insiders (managers and board members), last 12 months</strong>
+      <p class="${pointCls}">${point}</p>
+      <ul class="insider-lines">${lines.join("")}</ul>
+      <p class="subtitle">Source: the reports insiders must send the US market regulator within two days of every trade. Amounts in US dollars.</p>
     </div>`;
 }
 

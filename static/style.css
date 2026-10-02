@@ -151,6 +151,8 @@ button.danger { background: var(--rust); }
 .tensions .sig-mid, .sig-mid { color: var(--amber); }
 .tensions .sig-neg, .sig-neg { color: var(--rust); }
 .tensions .sig-none, .sig-none { color: var(--text); }
+.tensions ul.insider-people { list-style: none; margin: 0.15rem 0 0.1rem; padding-left: 0.9rem; }
+.tensions ul.insider-people li { margin: 0.1rem 0; color: var(--muted); }
 .tensions ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 .tensions li { font-size: 0.85rem; margin: 0.3rem 0; line-height: 1.35; }
 .tensions p { font-size: 0.85rem; margin: 0.4rem 0 0; line-height: 1.35; }
