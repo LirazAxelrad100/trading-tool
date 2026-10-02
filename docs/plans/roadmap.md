@@ -164,7 +164,10 @@ replacement.
 8. **Theme lifecycle staging** ✅ BUILT FREE (2026-09-05), see CLAUDE.md — staged on the user's own #tags from trailing returns already fetched, rather than paying for market-wide themes she doesn't hold. The paid version below remains an option only if she ever wants themes she has *no* position in. Was: — the one thing the cheaper alternatives can't replicate: flagging
    a theme as Emerging vs. Exhausting *before* the unwind. Needs FINVIZ Elite (€35/mo). Only
    worth revisiting if the user decides to pay.
-9. **"If I sold this now" — tax and what is left to reinvest, per holding.** Asked for 2026-10-01,
+9. **"If I sold this now" — tax and what is left to reinvest, per holding.** ✅ BUILT (2026-10-02):
+   `GET /api/holdings/{id}/sale-tax`, shown in the window behind a holding's Total cell (the
+   whole position at the current price) and live in the Sell modal for what is typed. See
+   CLAUDE.md. Was: asked for 2026-10-01,
    while deciding whether to keep a large winner she "would not buy today", held only for tax
    and for lack of a replacement. The tool already computes this, but only in the stop-hit
    panel, at the stop price, and only once the stop has fired. Wanted on demand for any holding

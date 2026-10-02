@@ -506,6 +506,47 @@ def update_holding(holding_id: str, update: HoldingUpdate):
     return holding
 
 
+@app.get("/api/holdings/{holding_id}/sale-tax")
+def sale_tax_preview(holding_id: str, shares: Optional[float] = None, total: Optional[float] = None):
+    """What a sale would cost in tax and leave to reinvest, before selling. Defaults to the
+    whole position at the current price; the Sell modal passes what was typed. The tax is
+    what this sale *adds* at the holding's bank (tax.tax_on_next_gain(): that bank's losses
+    and allowance, dividends included), and the proceeds after tax are what a replacement
+    has to be bought with. Came from deciding whether to keep MU (2026-10-01)."""
+    h = find_holding(load_holdings(), holding_id)
+    shares = h["shares"] if shares is None else shares
+    if shares <= 0 or shares > h["shares"] + 1e-9:
+        raise HTTPException(status_code=422, detail="Shares must be between 0 and what you hold.")
+    total = shares * h["current_price"] if total is None else total
+    # FIFO, as the sell endpoint does: the oldest lots are the ones a sale uses up.
+    remaining, cost = shares, 0.0
+    for lot in sorted(h.get("lots") or [], key=lambda lot: lot["purchase_date"]):
+        if remaining <= 1e-9:
+            break
+        if lot.get("cost_basis") is None:
+            return {"cost_unknown": True}
+        take = min(lot["shares"], remaining)
+        cost += take * lot["cost_basis"]
+        remaining -= take
+    gain = total - cost
+    broker = h.get("broker") or tax.DEFAULT_BROKER
+    t = tax.tax_on_next_gain(
+        load_sales_history(), str(date.today().year), gain, broker=broker,
+        settings=tax_settings_with_dividends(broker, cached_only=True),
+    )
+    return {
+        "broker": broker,
+        "shares": shares,
+        "proceeds": total,
+        "cost": cost,
+        "gain": gain,
+        "tax": t["extra_tax"],
+        "left": total - t["extra_tax"],
+        "losses_at_bank": t["offset_available"],
+        "allowance_at_bank": t["allowance"],
+    }
+
+
 @app.post("/api/holdings/{holding_id}/sell")
 def sell_holding(holding_id: str, sell: SellRequest):
     holdings = load_holdings()

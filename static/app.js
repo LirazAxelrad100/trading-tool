@@ -826,8 +826,48 @@ function showUnrealized(id) {
       <tr><td>Current value</td><td>${fmt(h.total)} EUR</td></tr>
       <tr><td>Unrealized ${gain >= 0 ? "gain" : "loss"}</td><td class="${cls}"><strong>${fmt(gain)} EUR (${pct >= 0 ? "+" : ""}${euPctFormat.format(pct)}%)</strong></td></tr>
     </table>
-    <p class="subtitle">Based on the current price ${fmt(h.current_price)} from the last refresh${h.manual_price ? " (manual)" : ""}.</p>`;
+    <p class="subtitle">Based on the current price ${fmt(h.current_price)} from the last refresh${h.manual_price ? " (manual)" : ""}.</p>
+    <div id="unrealized-tax" class="subtitle">Working out the tax…</div>`;
   document.getElementById("unrealized-modal").style.display = "flex";
+  fetch(`/api/holdings/${id}/sale-tax`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => {
+      const slot = document.getElementById("unrealized-tax");
+      if (slot) slot.outerHTML = saleTaxBlock(r, "If you sold it all now");
+    })
+    .catch(() => {
+      const slot = document.getElementById("unrealized-tax");
+      if (slot) slot.textContent = "";
+    });
+}
+
+// What a sale would add in tax at that bank and leave to reinvest. The proceeds after tax,
+// not the sale value, are what a replacement has to be bought with. The reason line says
+// what came off first, so a tax of zero or a small one is never a mystery.
+function saleTaxBlock(r, heading) {
+  if (!r || r.cost_unknown) return "";
+  const bank = escapeHtml(r.broker);
+  let reason;
+  if (r.gain <= 0) {
+    reason = `A loss: no tax, and ${fmt(Math.abs(r.gain))} EUR goes into ${bank}'s loss pot${
+      r.tax < 0 ? `, which also takes ${fmt(Math.abs(r.tax))} EUR off this year's tax there` : ""
+    }.`;
+  } else if (r.tax <= 0.005) {
+    reason = r.losses_at_bank >= r.gain
+      ? `No tax: the ${fmt(r.gain)} EUR profit is covered by the ${fmt(r.losses_at_bank)} EUR of losses already at ${bank}.`
+      : `No tax: the profit fits within what ${bank} still has in losses and allowance.`;
+  } else {
+    const off = [];
+    if (r.losses_at_bank > 0) off.push(`${fmt(r.losses_at_bank)} EUR of losses already at ${bank}`);
+    if (r.allowance_at_bank > 0) off.push(`the ${fmt(r.allowance_at_bank)} EUR allowance left there`);
+    reason = `On ${fmt(r.gain)} EUR profit${off.length ? `, after ${off.join(" and ")} come off` : `; ${bank} has no losses or allowance to set against it`}.`;
+  }
+  return `<table class="consensus-table">
+      <tr><td colspan="2"><strong>${heading}</strong></td></tr>
+      <tr><td>Tax ${bank} would take</td><td>${fmt(Math.max(0, r.tax))} EUR</td></tr>
+      <tr><td>Left to reinvest</td><td><strong>${fmt(r.left)} EUR</strong></td></tr>
+    </table>
+    <p class="subtitle">${reason} At 26,375%, no church tax.</p>`;
 }
 
 function closeUnrealizedModal() {
@@ -1500,7 +1540,7 @@ function renderOldHoldings(old, activeTotal) {
         <td>${buyIn}</td>
         <td>${fmt(h.current_price)}${h.isin ? ' <span class="subtitle" title="Priced directly from Lang &amp; Schwarz via ISIN">(LS)</span>' : ""}</td>
         <td class="${dayChangeClass(h.day_change_pct)}">${fmtDayChangePct(h.day_change_pct)}</td>
-        <td>${fmt(h.total)}${gain}</td>
+        <td${known ? ` class="total-cell" onclick="showUnrealized('${h.id}')"` : ""}>${fmt(h.total)}${gain}</td>
         <td>${fmtPct(h.portfolio_pct)}</td>
         <td>${zacksCell(h)}</td>
         <td>
@@ -3365,8 +3405,25 @@ function updateSellPreview() {
   if (h && h.current_price && (salePrice > h.current_price * 1.5 || salePrice < h.current_price / 1.5)) {
     warn = `<div class="sell-warn">⚠ ${fmt(salePrice)}/share is far from the current ${fmt(h.current_price)} — check "Shares sold" (did you sell only part of the position?).</div>`;
   }
-  preview.innerHTML = `<div>${line}</div>${warn}`;
+  preview.innerHTML = `<div>${line}</div>${warn}<div id="sell-tax"></div>`;
+
+  // Tax for exactly what was typed, after a short pause so each keystroke isn't a request.
+  if (!h) return;
+  const token = ++sellTaxToken;
+  clearTimeout(sellTaxTimer);
+  sellTaxTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/holdings/${h.id}/sale-tax?shares=${shares}&total=${total}`);
+      const r = res.ok ? await res.json() : null;
+      const slot = document.getElementById("sell-tax");
+      if (slot && token === sellTaxToken) slot.innerHTML = saleTaxBlock(r, "This sale");
+    } catch (e) {
+      /* the preview above still stands */
+    }
+  }, 400);
 }
+let sellTaxTimer = null;
+let sellTaxToken = 0;
 
 async function submitSell(overridePriceCheck = false) {
   const shares_sold = parseEuNumber(document.getElementById("sell-shares").value);

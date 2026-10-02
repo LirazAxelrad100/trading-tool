@@ -173,6 +173,7 @@ def tax_on_next_gain(sales: list, year: str, gain: float, broker: Optional[str] 
             "extra_tax": after["estimated_tax"] - before["estimated_tax"],
             "net_before": before["net"],
             "offset_available": before["carry_forward"],
+            "allowance": before["allowance"] - before["allowance_used"],
         }
     before = year_summary(sales, year)
     after = year_summary(sales + [{"sell_datetime": f"{year}-01-01", "realized_gain": gain}], year)
