@@ -199,6 +199,20 @@ def run() -> None:
     main.record_portfolio_snapshot(holdings)  # daily portfolio-value point for the chart
     main.record_holdings_snapshot(holdings)  # daily per-holding value point for the weekly table
 
+    # The watch list used to refresh only when the button was pressed, so its trailing returns
+    # could be a week old and its recorded price series had week-long gaps (2026-10-02: #ai read
+    # as still falling after two good weeks). Refreshing it here keeps both at most a day old,
+    # and a complete series lets the candidate Check use recorded prices instead of Alpha
+    # Vantage. Weekends have no new prices. Quiet on failure: the watch list never costs the
+    # stop check its email, and tomorrow's run tries again.
+    if not weekend:
+        try:
+            watch = main.refresh_all_watchlist()
+            if watch["errors"]:
+                print(f"watch list: {len(watch['errors'])} ticker(s) failed: {watch['errors']}")
+        except Exception as e:
+            print(f"watch list refresh skipped: {e}")
+
     # A dividend reminder must never cost the stop check its email, so any failure here
     # (no FX rate, Alpha Vantage down) just skips it until tomorrow.
     try:
