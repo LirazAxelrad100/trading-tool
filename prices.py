@@ -216,21 +216,6 @@ def fetch_earnings_calendar(ticker: str) -> dict:
     }
 
 
-def fetch_insider_transactions(ticker: str, limit: int = 5) -> list:
-    data = _finnhub_get("stock/insider-transactions", {"symbol": ticker})
-    rows = data.get("data") or []
-    return [
-        {
-            "name": row.get("name"),
-            "shares": row.get("share"),
-            "change": row.get("change"),
-            "transaction_date": row.get("transactionDate"),
-            "transaction_price": row.get("transactionPrice"),
-        }
-        for row in rows[:limit]
-    ]
-
-
 def fetch_company_news(ticker: str, days: int = 7, limit: int = 8) -> list:
     today = date.today()
     data = _finnhub_get(

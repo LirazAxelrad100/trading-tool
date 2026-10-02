@@ -177,7 +177,8 @@ replacement.
    data. Shape: probably a line in the Sell modal before confirming, and/or a per-row action;
    decide with her. Show the price date, since a stale price makes a stale tax figure. Describes
    a hypothetical, never suggests selling.
-10. **Insider purchases as their own signal — a check that isn't an analyst.** Asked for
+10. **Insider purchases as their own signal — a check that isn't an analyst.** ✅ BUILT
+   (2026-10-02) from SEC EDGAR directly, as `insiders.py`; see CLAUDE.md. Was: asked for
    2026-10-01, after noticing that Zacks' rank and the Finnhub consensus are both built from the
    same brokers' analysts, so more of either is not a second opinion. Finnhub's free
    `stock/insider-transactions` is SEC Form 4 data: legally required, factual, and independent of

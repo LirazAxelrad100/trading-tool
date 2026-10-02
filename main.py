@@ -20,6 +20,7 @@ import concentration
 import consensus_store
 import dividends
 import fundamentals
+import insiders
 import ls_tc
 import momentum
 import opportunities_b
@@ -1610,6 +1611,16 @@ def get_stop_history(ticker: str, cached_only: bool = False):
     try:
         return risk.stop_history(ticker.upper(), cached_only=cached_only)
     except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/insiders/{ticker}")
+def get_insiders(ticker: str):
+    """What insiders bought and sold over 12 months, from SEC Form 4 — see insiders.py. The
+    first look at a ticker reads every filing (up to ~20 s); after that it is cached."""
+    try:
+        return insiders.summary(ticker)
+    except insiders.InsiderError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 

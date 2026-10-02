@@ -43,6 +43,7 @@ function fmtPct(n) {
 // For figures that are round by definition — a statutory allowance, not a computed amount.
 // "1.000,00 EUR" reads as something that was worked out; "1.000 EUR" reads as the rule it is.
 const euIntFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+const euDec1 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 const euSharesFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 8 });
 function fmtShares(n) {
@@ -1186,10 +1187,68 @@ async function analyzeTicker(ticker) {
       return;
     }
     const result = await res.json();
-    body.innerHTML = renderSignals(result) + `<p class="analysis-text">${renderAnalysisText(result.analysis)}</p>`;
+    body.innerHTML =
+      renderSignals(result) +
+      `<div id="insider-slot" class="subtitle">Reading insider filings…</div>` +
+      `<p class="analysis-text">${renderAnalysisText(result.analysis)}</p>`;
+    loadInsiders(ticker);
   } catch (e) {
     body.innerHTML = `<p class="empty">Failed to generate analysis: ${e}</p>`;
   }
+}
+
+// Loaded after the rest, because the first look at a ticker reads every filing of the year.
+async function loadInsiders(ticker) {
+  let r = null;
+  try {
+    const res = await fetch(`/api/insiders/${ticker}`);
+    r = res.ok ? await res.json() : null;
+  } catch (e) {
+    r = null;
+  }
+  const slot = document.getElementById("insider-slot");
+  if (!slot || document.getElementById("analysis-modal-title").textContent !== ticker) return;
+  slot.outerHTML = renderInsiders(r);
+}
+
+function usdShort(v) {
+  if (v >= 1e6) return `$${euDec1.format(v / 1e6)} m`;
+  if (v >= 1e3) return `$${euIntFormat.format(Math.round(v / 1e3))} k`;
+  return `$${euIntFormat.format(Math.round(v))}`;
+}
+
+// What the people running the company did with their own shares. Purchases lead: insiders sell
+// for many reasons and buy for one. Sales are split by whether the timing was theirs — a sale
+// set months ahead in a 10b5-1 plan, or sold automatically to pay tax on vesting stock, says
+// little about today. See insiders.py.
+function renderInsiders(r) {
+  if (!r || r.error) return "";
+  const who = (p) => `${escapeHtml(p.name)}${p.title ? ` (${escapeHtml(p.title)})` : ""} ${usdShort(p.value)}`;
+  const bought = r.bought.length
+    ? `<p><strong>Bought on the market:</strong> ${usdShort(r.bought_value)} — ${r.bought.map(who).join(", ")}.</p>`
+    : `<p>No insider bought shares on the market.</p>`;
+  let sold = `<p>No insider sold shares.</p>`;
+  if (r.sold_value > 0) {
+    const s = r.sold;
+    const parts = [];
+    if (s.scheduled > 0) parts.push(`${usdShort(s.scheduled)} set months ahead in a trading plan`);
+    if (s.tax > 0) parts.push(`${usdShort(s.tax)} sold automatically to pay tax on stock pay`);
+    const how = r.own_timing_from_options > s.own_timing / 2 ? ", mostly by exercising options and selling at once" : "";
+    const names = r.own_timing.map(who).join(", ");
+    if (!parts.length) {
+      sold = `<p><strong>Sold ${usdShort(r.sold_value)}, all at their own timing</strong>${how} — ${names}.</p>`;
+    } else {
+      const own = s.own_timing > 0
+        ? `<strong>${usdShort(s.own_timing)} at their own timing</strong>${how} — ${names}.`
+        : `none at their own timing.`;
+      sold = `<p><strong>Sold ${usdShort(r.sold_value)}:</strong> ${parts.join(", ")}; ${own}</p>`;
+    }
+  }
+  return `<div class="tensions">
+      <strong>Insiders, last 12 months</strong>
+      ${bought}${sold}
+      <p class="subtitle">From ${r.filings} SEC filings (Form 4), in dollars.</p>
+    </div>`;
 }
 
 function closeAnalysisModal() {

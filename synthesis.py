@@ -22,11 +22,11 @@ load_dotenv(Path(__file__).parent / ".env")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-5"
 
-SYSTEM_PROMPT = """You are a financial data analyst helping an individual investor read their own research on a single stock ticker. You will be given structured data: Zacks Rank screening metrics, analyst consensus ratings, an Opportunities B score (a separate methodology built on analyst conviction and earnings-beat consistency, distinct from Zacks' estimate-revision-driven rank), recent earnings history, the next earnings date, recent insider trading activity, recent news headlines, and news sentiment scores.
+SYSTEM_PROMPT = """You are a financial data analyst helping an individual investor read their own research on a single stock ticker. You will be given structured data: Zacks Rank screening metrics, analyst consensus ratings, an Opportunities B score (a separate methodology built on analyst conviction and earnings-beat consistency, distinct from Zacks' estimate-revision-driven rank), recent earnings history, the next earnings date, recent news headlines, and news sentiment scores.
 
 Write a TIGHT, skimmable synthesis in prose — 3-4 paragraphs, aiming for roughly 180-250 words total (not per paragraph). This is a hard budget: pick the handful of facts that most matter and drop or fold in the rest, rather than covering every metric in the data. The reader should be able to read the whole thing in one pass, not skim past it because it's too long. Specifically:
 - Begin every paragraph with a short bold lead-in — 3 to 7 words that summarise that paragraph's takeaway — wrapped in double asterisks, followed by 2-3 sentences of support, not a full explanatory essay. For example: "**Estimates rising, price lagging.** Analysts raised earnings forecasts over the past month, but the share price drifted lower over the same stretch — the market isn't confirming the optimism yet." The lead-in must describe what the paragraph says, never give a recommendation.
-- Organize by THEME, not by data category — don't give VGM scores, Opportunities B, consensus, and insider activity each their own paragraph. Group whatever agrees into one paragraph and whatever conflicts into another; mention a metric only if it changes the reading, skip ones that just restate what's already been said.
+- Organize by THEME, not by data category — don't give VGM scores, Opportunities B, and consensus each their own paragraph. Group whatever agrees into one paragraph and whatever conflicts into another; mention a metric only if it changes the reading, skip ones that just restate what's already been said.
 - Explicitly call out where signals AGREE (reinforcing a read) and where they CONFLICT (creating ambiguity) — one clear sentence each, not paragraphs of caveats. Include the Zacks-vs-Opportunities-B comparison only if it's actually informative here (they measure different things: Zacks = is estimate momentum accelerating now; Opportunities B = how strong is underlying analyst conviction and the earnings-beat record).
 - Fold in risk context (upcoming earnings date, beat/miss pattern) and the news narrative wherever they're most relevant — they don't need their own paragraph unless they're the single biggest story here.
 - If data for a category is missing, unavailable, or simply doesn't add anything new, omit it entirely — don't mention a category just to say there's nothing notable in it.
@@ -254,7 +254,6 @@ def gather_ticker_data(ticker: str) -> dict:
     consensus = _safe(consensus_store.refresh, ticker)
     earnings_history = _safe(prices.fetch_earnings_history, ticker)
     earnings_calendar = _safe(prices.fetch_earnings_calendar, ticker)
-    insider_transactions = _safe(prices.fetch_insider_transactions, ticker)
     news = _safe(prices.fetch_company_news, ticker)
     sentiment = _safe(alpha_vantage.fetch_news_sentiment, ticker)
     opp_b_score = opportunities_b.score_ticker(ticker)
@@ -265,7 +264,6 @@ def gather_ticker_data(ticker: str) -> dict:
         "analyst_consensus": consensus,
         "earnings_history": earnings_history,
         "next_earnings": earnings_calendar,
-        "insider_transactions": insider_transactions,
         "recent_news": news,
         "news_sentiment": sentiment,
         "opportunities_b": {
