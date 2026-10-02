@@ -2248,28 +2248,28 @@ function watchHashtags(w) {
   return ((w.why || "").match(HASHTAG_RE) || []).map((h) => h.toLowerCase());
 }
 
-// Theme lifecycle, on the user's own #tags rather than a vendor's theme list. The paid
-// FINVIZ-based skill scores 14 market-wide themes; these are the groups she actually holds
-// opinions about, and two free trailing returns separate "was strong and is unwinding" from
-// "still working" — which is the distinction that mattered, not the vendor's five-stage label.
-const THEME_STAGES = {
-  working: { label: "still working", cls: "price-up" },
-  unwinding: { label: "was strong, now unwinding", cls: "price-down" },
-  turning: { label: "falling for a year, rising lately", cls: "" },
-  cold: { label: "not working", cls: "price-down" },
-};
-
-function themeStage(m12, m3) {
-  if (m12 == null || m3 == null) return null;
-  if (m12 >= 0 && m3 >= 0) return "working";
-  if (m12 >= 0) return "unwinding";
-  if (m3 >= 0) return "turning";
-  return "cold";
+// How each #tag group is moving, member by member. A tag is her reason for watching (one word:
+// #double means "expected to rebound"), so the useful question is which members are doing what
+// the tag expects. An earlier version staged the group from averages ("still working",
+// "not working", then "falling for a year, still falling"); she found it added only confusion,
+// rightly: the average said "still falling" while TOST, one of the three, had risen 12% in
+// three months. Naming each member with its own move can't hide that. The 12-month half of the
+// old stage went with it; the tag already says why the stock is there.
+function moversLine(items) {
+  return items
+    .filter((i) => typeof i.move_3m === "number")
+    .sort((a, b) => b.move_3m - a.move_3m)
+    .map((i) => `${i.ticker} ${coloredPct(i.move_3m)}`)
+    .join(", ");
 }
 
-function avg(values) {
-  const nums = values.filter((v) => typeof v === "number");
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+function risingCount(items) {
+  const known = items.filter((i) => typeof i.move_3m === "number");
+  const up = known.filter((i) => i.move_3m >= 0).length;
+  if (!known.length) return null;
+  if (up === known.length) return `all ${known.length} rising lately`;
+  if (up === 0) return `none of the ${known.length} rising lately`;
+  return `${up} of ${known.length} rising lately`;
 }
 
 function renderThemeStages() {
@@ -2285,23 +2285,15 @@ function renderThemeStages() {
   const rows = [];
   for (const [tag, items] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length)) {
     if (items.length < 2) continue; // one ticker is a stock, not a theme
-    const m12 = avg(items.map((i) => i.move_12m));
-    const m3 = avg(items.map((i) => i.move_3m));
-    const oh = avg(items.map((i) => i.off_high));
-    const stage = themeStage(m12, m3);
-    if (!stage) continue;
-    const s = THEME_STAGES[stage];
+    const count = risingCount(items);
+    if (!count) continue;
     rows.push(
-      `<li><strong>${escapeHtml(tag)}</strong> · ${items.length} names — <span class="${s.cls}">${
-        s.label
-      }</span><br /><span class="subtitle">${coloredPct(m12)} over the year, ${coloredPct(
-        m3
-      )} over 3 months${oh != null ? `, ${fmtPct(Math.abs(oh) / 100)} below their highs on average` : ""}.</span></li>`
+      `<li><strong>${escapeHtml(tag)}</strong> · ${count}<br /><span class="subtitle">Last 3 months: ${moversLine(items)}.</span></li>`
     );
   }
   host.innerHTML = rows.length
     ? `<ul class="checklist-context">${rows.join("")}</ul>`
-    : `<p class="subtitle">Tag two or more tickers with the same #tag to see how that group is doing as a whole.</p>`;
+    : `<p class="subtitle">Tag two or more tickers with the same #tag to see how each of them is moving.</p>`;
 }
 
 // Profit against price, as its own table under the watch list rather than two more columns.
@@ -2980,17 +2972,9 @@ function renderRiskContext() {
   for (const tag of watchHashtags(riskTicker)) {
     const peers = watchlist.filter((w) => w.id !== riskTicker.id && watchHashtags(w).includes(tag));
     if (!peers.length) continue;
-    const m3 = avg(peers.map((w) => w.move_3m));
-    const m12 = avg(peers.map((w) => w.move_12m));
-    const stage = themeStage(m12, m3);
-    if (stage) {
-      bits.push(
-        `<li>You tagged it <strong>${escapeHtml(tag)}</strong>, alongside ${peers
-          .map((w) => w.ticker)
-          .join(" · ")} — that group: <span class="${THEME_STAGES[stage].cls}">${
-          THEME_STAGES[stage].label
-        }</span>.</li>`
-      );
+    const line = moversLine(peers);
+    if (line) {
+      bits.push(`<li>You tagged it <strong>${escapeHtml(tag)}</strong>, with ${line} over the last 3 months.</li>`);
     }
   }
   if (riskTicker.price_at_add != null && riskTicker.current_price != null) {

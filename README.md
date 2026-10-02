@@ -148,7 +148,7 @@ Everything here is descriptive. It surfaces facts and never says what to buy or 
 - **Which holdings move together** — groups holdings by co-movement rather than by sector, since sector labels split a single bet across categories. Also shows how each behaved on the portfolio's worst days, because things that look independent day to day often fall together when it matters.
 - **How much of the market is participating** — the share of US stocks rising against their own recent average, so a broad advance can be told from one carried by a few names.
 - **Before you buy** (per watch-list row) — what the tool already knows about that stock (whether it is rising, whether it moves with what you hold and how it did on your worst days, how often a trailing stop would have sold it recently), and three fixed questions only you can answer.
-- **Thesis capture** — a free-text *why* plus an optional source link on both watch-list items and holdings, with `#tags` grouping tickers that came from the same idea. Buying a watched ticker carries its reasoning onto the position. Each #tag group is staged as *still working* or *was strong, now unwinding* from its own trailing returns.
+- **Thesis capture** — a free-text *why* plus an optional source link on both watch-list items and holdings, with `#tags` grouping tickers that came from the same idea. Buying a watched ticker carries its reasoning onto the position. Each #tag group shows how many of its members are rising lately, and each member's own 3-month move, so an average can't hide one stock that turned while the others kept falling.
 
 Prices for watch-list items and holdings are recorded once a day, so correlation and trend work builds its own history rather than spending an API budget on someone else's.
 
