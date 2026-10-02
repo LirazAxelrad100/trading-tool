@@ -145,6 +145,12 @@ button.danger { background: var(--rust); }
   margin: 0.75rem 0;
 }
 .tensions strong { color: var(--amber); font-size: 0.9rem; }
+/* Signal strength inside a box: green positive, amber mild, rust negative, plain for none.
+   Written to beat `.tensions strong`, which would otherwise turn every bold figure amber. */
+.tensions .sig-pos, .sig-pos { color: var(--green); }
+.tensions .sig-mid, .sig-mid { color: var(--amber); }
+.tensions .sig-neg, .sig-neg { color: var(--rust); }
+.tensions .sig-none, .sig-none { color: var(--text); }
 .tensions ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 .tensions li { font-size: 0.85rem; margin: 0.3rem 0; line-height: 1.35; }
 .tensions p { font-size: 0.85rem; margin: 0.4rem 0 0; line-height: 1.35; }

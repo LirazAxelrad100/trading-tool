@@ -1221,27 +1221,43 @@ function usdShort(v) {
 // for many reasons and buy for one. Sales are split by whether the timing was theirs — a sale
 // set months ahead in a 10b5-1 plan, or sold automatically to pay tax on vesting stock, says
 // little about today. See insiders.py.
+// Colour follows signal strength, strongest first: buying green; own-timing sales amber, or rust
+// when the reasons that strengthen them stack up (two or more sellers, a C-level among them,
+// and nobody buying); planned and tax sales plain, since they say nothing about today.
+const SENIOR_TITLE = /\b(CEO|CFO|COO|Chief|President)\b/i;
+
 function renderInsiders(r) {
   if (!r || r.error) return "";
   const who = (p) => `${escapeHtml(p.name)}${p.title ? ` (${escapeHtml(p.title)})` : ""} ${usdShort(p.value)}`;
   const bought = r.bought.length
-    ? `<p><strong>Bought on the market:</strong> ${usdShort(r.bought_value)} — ${r.bought.map(who).join(", ")}.</p>`
-    : `<p>No insider bought shares on the market.</p>`;
-  let sold = `<p>No insider sold shares.</p>`;
+    ? `<p><strong class="sig-pos" title="Insiders buy with their own money for one reason: they think the shares are worth more. The strongest signal.">Bought on the market: ${usdShort(
+        r.bought_value
+      )}</strong> — ${r.bought.map(who).join(", ")}.</p>`
+    : `<p class="sig-none">No insider bought shares on the market.</p>`;
+  let sold = `<p class="sig-none">No insider sold shares.</p>`;
   if (r.sold_value > 0) {
     const s = r.sold;
+    const plain = (text, why) => `<span class="sig-none" title="${why}">${text}</span>`;
     const parts = [];
-    if (s.scheduled > 0) parts.push(`${usdShort(s.scheduled)} set months ahead in a trading plan`);
-    if (s.tax > 0) parts.push(`${usdShort(s.tax)} sold automatically to pay tax on stock pay`);
+    if (s.scheduled > 0)
+      parts.push(plain(`${usdShort(s.scheduled)} set months ahead in a trading plan`, "Decided months ago: says almost nothing about today."));
+    if (s.tax > 0)
+      parts.push(plain(`${usdShort(s.tax)} sold automatically to pay tax on stock pay`, "Automatic, nobody decided anything: no signal."));
+    const strong =
+      !r.bought.length && r.own_timing.length >= 2 && r.own_timing.some((p) => SENIOR_TITLE.test(p.title || ""));
+    const cls = strong ? "sig-neg" : "sig-mid";
+    const why = strong
+      ? "Several insiders, a C-level among them, chose to sell while nobody bought: the strongest form a sale takes. Still not proof: people sell for tax, diversification, a house."
+      : "They chose the timing. A weak signal on its own: people sell for many reasons.";
     const how = r.own_timing_from_options > s.own_timing / 2 ? ", mostly by exercising options and selling at once" : "";
     const names = r.own_timing.map(who).join(", ");
     if (!parts.length) {
-      sold = `<p><strong>Sold ${usdShort(r.sold_value)}, all at their own timing</strong>${how} — ${names}.</p>`;
+      sold = `<p><strong class="${cls}" title="${why}">Sold ${usdShort(r.sold_value)}, all at their own timing</strong>${how} — ${names}.</p>`;
     } else {
       const own = s.own_timing > 0
-        ? `<strong>${usdShort(s.own_timing)} at their own timing</strong>${how} — ${names}.`
+        ? `<strong class="${cls}" title="${why}">${usdShort(s.own_timing)} at their own timing</strong>${how} — ${names}.`
         : `none at their own timing.`;
-      sold = `<p><strong>Sold ${usdShort(r.sold_value)}:</strong> ${parts.join(", ")}; ${own}</p>`;
+      sold = `<p><strong class="sig-none">Sold ${usdShort(r.sold_value)}:</strong> ${parts.join(", ")}; ${own}</p>`;
     }
   }
   return `<div class="tensions">
