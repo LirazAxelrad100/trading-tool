@@ -118,8 +118,12 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
     carried_in = 0.0
     if pot is not None:
         carried_in = float(pot)
+        # The pot date has no time, so a sale on that same day is counted: the usual order is
+        # read the pot, then sell. Comparing dates only dropped exactly that sale (WDC,
+        # 2026-10-05: pots read at 15:50, sold at 19:07, and the sale vanished from the pot).
+        # A full timestamp sorts after its own bare date, so this keeps same-day sales.
         if as_of:
-            rows = [s for s in rows if (s.get("sell_datetime") or s.get("sell_date") or "")[:10] > as_of]
+            rows = [s for s in rows if (s.get("sell_datetime") or s.get("sell_date") or "") > as_of]
     # Every sale here is a share, so the order the two pots are used in cannot change the
     # total: a share profit meets the share pot first and the other pot after it.
     other_pot = float(settings.get("other_loss_pot") or 0)

@@ -3483,7 +3483,7 @@ async function submitSell(overridePriceCheck = false) {
   const sell_time = document.getElementById("sell-time").value;
 
   if (isNaN(shares_sold) || shares_sold <= 0 || isNaN(total_sum) || total_sum < 0 || !sell_date) {
-    alert("Enter shares sold, total sum received, and a sell date.");
+    alert("Enter shares sold, the sale total before tax, and a sell date.");
     return;
   }
 
