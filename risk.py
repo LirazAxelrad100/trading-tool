@@ -57,6 +57,31 @@ def compute_volatility(ticker: str, days: int = 90) -> dict:
 
 STOP_WIDTHS = [10, 15, 20, 25]
 
+# The user's own rule (2026-10-05), not the tool's: the stop width she wants by default for a
+# new holding at each volatility level. The tool never picks a width — it applies hers, the
+# same way it applies her minimum position size, and she can type over it. It came from RDDT,
+# bought with the 10% default when a 10% stop would have sold it 10 times in 100 days.
+STOP_BY_LEVEL = {"Low": 10, "Moderate": 15, "High": 20, "Very high": 25}
+
+
+def stop_default(ticker: str) -> dict:
+    """Volatility level, the user's stop width for it, and how often that width would have
+    fired. Both readings share alpha_vantage's per-ticker-per-day cache, so this is one call
+    the first time a ticker is looked at each day and free after that."""
+    vol = compute_volatility(ticker)
+    if vol.get("error"):
+        return vol
+    width = STOP_BY_LEVEL[vol["label"]]
+    stops = stop_history(ticker)
+    return {
+        "level": vol["label"],
+        "annualized_pct": vol["annualized_pct"],
+        "typical_daily_move_pct": stops.get("typical_daily_move_pct"),
+        "width": width,
+        "fires": (stops.get("fires") or {}).get(width),
+        "days": stops.get("days"),
+    }
+
 
 def stop_history(ticker: str, cached_only: bool = False) -> dict:
     """How often a trailing stop of each width would have sold this stock over the last

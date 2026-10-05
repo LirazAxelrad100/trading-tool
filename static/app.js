@@ -1786,6 +1786,10 @@ async function addHolding() {
     (id) => (document.getElementById(id).value = "")
   );
   document.getElementById("f-exit-plan").value = "hold";
+  stopDefault = null;
+  stopTyped = false;
+  stopDefaultToken++;
+  document.getElementById("stop-hint").textContent = "";
   await render();
 }
 
@@ -1837,6 +1841,59 @@ async function markRiskViewed(w) {
   }
 }
 
+// The Add form's default stop comes from the user's own rule — a width per volatility level
+// (risk.STOP_BY_LEVEL) — never from the tool. It fills the stop only while she hasn't typed
+// one, so it can always be overridden, and the hint says how often that width would have
+// sold the stock, so the default is checkable rather than taken on trust.
+let stopDefault = null;
+let stopTyped = false;
+let stopDefaultToken = 0;
+
+const LEVEL_WORDS = { Low: "low", Moderate: "moderate", High: "high", "Very high": "very high" };
+
+async function loadStopDefault() {
+  const ticker = document.getElementById("f-ticker").value.trim().toUpperCase();
+  const hint = document.getElementById("stop-hint");
+  stopDefault = null;
+  const token = ++stopDefaultToken;
+  if (!/^[A-Z][A-Z.]{0,5}$/.test(ticker)) {
+    hint.textContent = "";
+    return;
+  }
+  hint.textContent = `Measuring how much ${ticker} swings…`;
+  let d;
+  try {
+    const res = await fetch(`/api/risk/stop-default/${encodeURIComponent(ticker)}`);
+    d = await res.json();
+    if (!res.ok) throw new Error(d.detail || "no price history");
+  } catch (e) {
+    if (token === stopDefaultToken) hint.textContent = `Couldn't measure ${ticker}'s swings (${e.message}), so no default stop.`;
+    return;
+  }
+  if (token !== stopDefaultToken) return; // a newer ticker was typed meanwhile
+  if (d.error) {
+    hint.textContent = `Couldn't measure ${ticker}'s swings (${d.error}), so no default stop.`;
+    return;
+  }
+  stopDefault = d;
+  const fires =
+    d.fires == null
+      ? ""
+      : ` A ${d.width}% stop would have sold it ${d.fires === 0 ? "no times" : d.fires === 1 ? "once" : `${d.fires} times`} in the last ${d.days} trading days.`;
+  hint.innerHTML = `<strong>${escapeHtml(ticker)}: ${LEVEL_WORDS[d.level]} volatility</strong>${
+    d.typical_daily_move_pct != null ? `, a typical day moves ${euDec1.format(d.typical_daily_move_pct)}%` : ""
+  }. Your rule for that level: a <strong>${d.width}%</strong> stop below the buy-in.${fires} You can type over it.`;
+  applyStopDefault();
+}
+
+function applyStopDefault() {
+  if (!stopDefault || stopTyped) return;
+  const cost = parseEuNumber(document.getElementById("f-cost").value);
+  if (isNaN(cost) || cost <= 0) return;
+  const stop = Math.round(cost * (1 - stopDefault.width / 100) * 100) / 100;
+  document.getElementById("f-stop").value = toEuInput(stop);
+}
+
 function promoteWatchItem(id) {
   const w = watchlist.find((x) => x.id === id);
   if (!w) return;
@@ -1859,6 +1916,7 @@ function promoteWatchItem(id) {
   showTab("stocks");
   const field = document.getElementById("f-ticker");
   field.value = w.ticker;
+  loadStopDefault();
   // Local date, not toISOString(): between midnight and 02:00 in Berlin the UTC date is
   // still yesterday — the same bug that once shifted the weekly table.
   document.getElementById("f-date").value = localToday();

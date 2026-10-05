@@ -1618,6 +1618,16 @@ def get_stop_history(ticker: str, cached_only: bool = False):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/risk/stop-default/{ticker}")
+def get_stop_default(ticker: str):
+    """The Add form's default stop: the volatility level and the width the user set for it
+    (risk.STOP_BY_LEVEL). One Alpha Vantage call per new ticker per day."""
+    try:
+        return risk.stop_default(ticker.upper())
+    except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/insiders/{ticker}")
 def get_insiders(ticker: str):
     """What insiders bought and sold over 12 months, from SEC Form 4 — see insiders.py. The
