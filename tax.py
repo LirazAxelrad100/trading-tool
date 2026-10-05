@@ -24,9 +24,10 @@ Scope and limits, all deliberate:
   here — stated in the UI rather than hidden.
 - **Church tax is not included.** The 26,375% is 25% plus the 5,5% Solidaritätszuschlag, the
   rate already used everywhere else in the tool.
-- **Carry-forward is computed from this tool's own records.** The sales log is complete for
-  2026 and there is nothing before it, so the 2026 opening balance is genuinely zero. A year
-  this tool did not record would need its carry-in supplied from outside.
+- **Carry-forward comes from the bank when entered, else from this tool's own records.** The
+  records alone were not enough even for Trade Republic: its pot held losses from years before
+  this tool existed, so the tool's figure was far too small (and the tax far too high) until
+  the bank's own figure was entered (see `bank_summary()`).
 
 It is an estimate, not a tax return. Trade Republic reports to the Finanzamt at source and its
 own numbers are the ones that count.
@@ -101,6 +102,11 @@ def sale_broker(sale: dict) -> str:
 #                      only sales recorded after it are added. When missing, the pot is
 #                      computed from this tool's own sales log (right for Trade Republic,
 #                      whose 2026 sales are all recorded here).
+#   other_loss_pot   — the bank's "other" loss pot (allgemeiner Verlusttopf: losses on
+#                      anything that is not a share). Unlike the share pot it may offset any
+#                      capital income, share profits included, so it comes off a sale's profit
+#                      after the share pot does. Interest and dividends use it up too, which
+#                      this tool does not track, so it goes stale faster than the share pot.
 #   as_of            — also dates the allowance: dividends paid after it are taken off.
 #   dividends        — not stored; added at read time by main.tax_settings_with_dividends().
 def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] = None,
@@ -114,6 +120,10 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
         carried_in = float(pot)
         if as_of:
             rows = [s for s in rows if (s.get("sell_datetime") or s.get("sell_date") or "")[:10] > as_of]
+    # Every sale here is a share, so the order the two pots are used in cannot change the
+    # total: a share profit meets the share pot first and the other pot after it.
+    other_pot = float(settings.get("other_loss_pot") or 0)
+    carried_in += other_pot
     if "allowance_left" in settings:
         allowance = float(settings["allowance_left"] or 0)
     else:
@@ -126,6 +136,7 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
     summary = year_summary(rows, year, carried_in=carried_in, allowance=allowance)
     summary.update({"broker": broker, "pot_as_of": as_of if pot is not None else None,
                     "pot_from": "bank" if pot is not None else "records",
+                    "share_pot": float(pot) if pot is not None else None, "other_pot": other_pot,
                     "allowance_entered": entered, "dividends": divs})
     return summary
 

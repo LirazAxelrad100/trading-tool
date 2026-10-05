@@ -3588,10 +3588,13 @@ function renderSalesSummary(s, settings) {
   const bankBlock = (b) => {
     const entered = settings && settings[b.broker];
     const pot =
-      b.pot_from === "bank"
-        ? `<tr><td>Loss pot the bank reported on ${fmtDate(b.pot_as_of)}</td><td class="price-down">−${fmt(b.carried_in)} EUR</td></tr>`
-        : "";
-    const rows = b.sales || b.pot_from === "bank"
+      (b.pot_from === "bank"
+        ? `<tr><td>Share loss pot the bank reported on ${fmtDate(b.pot_as_of)}</td><td class="price-down">−${fmt(b.share_pot)} EUR</td></tr>`
+        : "") +
+      (b.other_pot > 0
+        ? `<tr><td>Other loss pot (also comes off share profit)</td><td class="price-down">−${fmt(b.other_pot)} EUR</td></tr>`
+        : "");
+    const rows = b.sales || pot
       ? `<table class="mini-table"><tbody>
           ${b.sales ? `<tr><td>Profit on sales that made money</td><td class="price-up">${fmt(b.gains)} EUR</td></tr>
           <tr><td>Loss on sales that lost money</td><td class="price-down">${fmt(b.losses)} EUR</td></tr>` : ""}
@@ -3632,6 +3635,9 @@ function renderSalesSummary(s, settings) {
         <div><label>Share-loss pot (leave empty to use this tool's sales)</label><input id="tx-pot-${id}" type="text" inputmode="decimal" value="${
           e.share_loss_pot != null ? toEuInput(e.share_loss_pot) : ""
         }" /></div>
+        <div><label>Other loss pot (if the bank shows one)</label><input id="tx-other-${id}" type="text" inputmode="decimal" value="${
+          e.other_loss_pot != null ? toEuInput(e.other_loss_pot) : ""
+        }" placeholder="0" /></div>
         <div><label>Date you read these</label><input id="tx-asof-${id}" type="date" value="${e.as_of || ""}" /></div>
         <button class="secondary" onclick="saveBankTax('${escapeHtml(b.broker)}', '${id}')">Save</button>
       </div>`;
@@ -3655,7 +3661,9 @@ async function saveBankTax(broker, id) {
   const allow = parseEuNumber(document.getElementById(`tx-allow-${id}`).value || "0");
   const potRaw = document.getElementById(`tx-pot-${id}`).value.trim();
   const pot = potRaw ? Math.abs(parseEuNumber(potRaw)) : null;
-  if (isNaN(allow) || (potRaw && isNaN(pot))) {
+  const otherRaw = document.getElementById(`tx-other-${id}`).value.trim();
+  const other = otherRaw ? Math.abs(parseEuNumber(otherRaw)) : null;
+  if (isNaN(allow) || (potRaw && isNaN(pot)) || (otherRaw && isNaN(other))) {
     alert("Enter the amounts as numbers.");
     return;
   }
@@ -3665,6 +3673,7 @@ async function saveBankTax(broker, id) {
     body: JSON.stringify({
       allowance_left: allow,
       share_loss_pot: pot,
+      other_loss_pot: other,
       as_of: document.getElementById(`tx-asof-${id}`).value || null,
     }),
   });

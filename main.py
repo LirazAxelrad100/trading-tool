@@ -1527,6 +1527,8 @@ class BankTaxIn(BaseModel):
     allowance_left: Optional[float] = None
     # Positive number: the losses the bank holds. None = compute from this tool's records.
     share_loss_pot: Optional[float] = None
+    # The bank's "other" loss pot, which can also offset share profits. None = not entered.
+    other_loss_pot: Optional[float] = None
     as_of: Optional[str] = None
 
 
@@ -1539,13 +1541,15 @@ def get_tax_settings():
 def put_tax_settings(broker: str, body: BankTaxIn):
     if (body.allowance_left is not None and not 0 <= body.allowance_left <= tax.ANNUAL_ALLOWANCE_EUR) or (
         body.share_loss_pot is not None and body.share_loss_pot < 0
-    ):
+    ) or (body.other_loss_pot is not None and body.other_loss_pot < 0):
         raise HTTPException(status_code=422, detail="Allowance must be 0–1.000 and the loss pot a positive amount.")
     settings = load_tax_settings()
     # The date dates the allowance too: dividends paid after it are taken off (dividends.py).
     entry = {"allowance_left": body.allowance_left or 0.0, "as_of": body.as_of or date.today().isoformat()}
     if body.share_loss_pot is not None:
         entry["share_loss_pot"] = body.share_loss_pot
+    if body.other_loss_pot:
+        entry["other_loss_pot"] = body.other_loss_pot
     settings[broker] = entry
     TAX_SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
     return settings
