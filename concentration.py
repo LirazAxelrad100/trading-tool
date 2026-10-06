@@ -284,58 +284,66 @@ def compare_candidate(ticker: str, holdings: list, history: list, sales: Optiona
     def usable(series: dict) -> list:
         return [d for d in dates if d in series and (not market or d in market)]
 
+    sales = sales or []
+
+    def measure(closes: dict):
+        shared = usable(closes)
+        if len(shared) < MIN_WORST_DAYS * 2:
+            return None
+        # Masked rather than filtered, so it stays index-aligned with the holdings' own series —
+        # a silently dropped day would shift every comparison by one.
+        candidate = _masked_returns([closes[d] for d in shared], [False] * len(shared))
+        raw_candidate = list(candidate)  # before the market adjustment, for the down-day reading
+        # Subtract the market's own move from every series. Raw correlation over a few weeks is
+        # inflated by the fact that most stocks fall on the days the market falls, so a candidate
+        # can score ~0.5 against a bloc simply for being a normal risky US stock. Measured live
+        # (2026-09-05): AMD/WDC held at +0.62 -> +0.64 through the adjustment (genuinely linked)
+        # while NBIS/NVDA fell +0.42 -> +0.28 (a third of it was just the market).
+        market_returns = (
+            _masked_returns([market[d] for d in shared], [False] * len(shared)) if market else None
+        )
+        if market_returns and any(m is None for m in market_returns):
+            market_returns = None
+        if market_returns:
+            candidate = [
+                r - m if r is not None else None
+                for r, m in zip(candidate, market_returns)
+            ]
+
+        raw_series = _series_by_ticker(holdings, by_ticker, sales, shared)
+        pairs = []
+        for other, series in sorted(raw_series.items()):
+            if market_returns:
+                series = [
+                    r - m if r is not None else None
+                    for r, m in zip(series, market_returns)
+                ]
+            corr = _pair_correlation(candidate, series)
+            if corr is None:
+                continue
+            pairs.append({"ticker": other, "correlation": corr})
+        return candidate, raw_candidate, market_returns, raw_series, pairs
+
+    # The recorded series is tried first and kept only if it actually produces a comparison.
+    # Counting its days is not enough to know that: the first guard counted days after the
+    # market intersection (INOD, RDDT, 2026-10-01), but DDOG (2026-10-04) then had 8 such days
+    # — enough to pass, too few for MIN_RETURNS — on a watch list refreshed irregularly, so
+    # every pair came back None and the check reported an error instead of falling back.
     closes = {p["date"]: p["price"] for p in (watchlist_history or []) if p["ticker"] == ticker}
     source = "recorded"
-    # Judged on the days that survive the market intersection, not on the recorded days alone:
-    # with 8 recorded days the recorded series used to "pass", then lose its newest days to the
-    # lagging market feed and fail outright instead of falling back (INOD, RDDT, 2026-10-01).
-    if len(usable(closes)) < MIN_WORST_DAYS * 2:
+    result = measure(closes)
+    if result is None or not result[4]:
         # cached_only: the Risk modal shows an earlier Check on open, but must not spend a call.
         if cached_only and not alpha_vantage.prices_cached_today(ticker):
             return {"cached": False}
         bars = alpha_vantage.fetch_daily_prices(ticker, days=len(dates) + 40)
         closes = {b["date"]: b["close"] for b in bars}
         source = "alpha vantage"
+        result = measure(closes)
 
-    shared = usable(closes)
-    if len(shared) < MIN_WORST_DAYS * 2:
+    if result is None:
         return {"error": f"Not enough overlapping days to compare {ticker} against your holdings."}
-
-    # Masked rather than filtered, so it stays index-aligned with the holdings' own series —
-    # a silently dropped day would shift every comparison by one.
-    candidate = _masked_returns([closes[d] for d in shared], [False] * len(shared))
-    raw_candidate = list(candidate)  # before the market adjustment, for the down-day reading
-    # Subtract the market's own move from every series. Raw correlation over a few weeks is
-    # inflated by the fact that most stocks fall on the days the market falls, so a candidate
-    # can score ~0.5 against a bloc simply for being a normal risky US stock. Measured live
-    # (2026-09-05): AMD/WDC held at +0.62 -> +0.64 through the adjustment (genuinely linked)
-    # while NBIS/NVDA fell +0.42 -> +0.28 (a third of it was just the market).
-    market_returns = (
-        _masked_returns([market[d] for d in shared], [False] * len(shared)) if market else None
-    )
-    if market_returns and any(m is None for m in market_returns):
-        market_returns = None
-    if market_returns:
-        candidate = [
-            r - m if r is not None else None
-            for r, m in zip(candidate, market_returns)
-        ]
-
-    sales = sales or []
-
-    raw_series = _series_by_ticker(holdings, by_ticker, sales, shared)
-    pairs = []
-    for other, series in sorted(raw_series.items()):
-        if market_returns:
-            series = [
-                r - m if r is not None else None
-                for r, m in zip(series, market_returns)
-            ]
-        corr = _pair_correlation(candidate, series)
-        if corr is None:
-            continue
-        pairs.append({"ticker": other, "correlation": corr})
-
+    candidate, raw_candidate, market_returns, raw_series, pairs = result
     if not pairs:
         return {"error": f"No holding has a comparable run of days against {ticker}."}
 
