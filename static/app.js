@@ -661,11 +661,12 @@ async function loadWeeklyTable() {
   const container = document.getElementById("weekly-table-container");
   if (!container) return;
   try {
-    const [totalRes, perStockRes] = await Promise.all([
+    const [totalRes, perStockRes, salesRes] = await Promise.all([
       fetch("/api/portfolio-history"),
       fetch("/api/holdings-history"),
+      fetch("/api/sales-history"),
     ]);
-    renderWeeklyTable(await totalRes.json(), await perStockRes.json());
+    renderWeeklyTable(await totalRes.json(), await perStockRes.json(), await salesRes.json());
   } catch (e) {
     container.innerHTML = `<p class="empty">Weekly table unavailable: ${e}</p>`;
   }
@@ -686,7 +687,51 @@ function weekRangeLabel(weekStartStr) {
   return `${start.toLocaleDateString("de-DE", opts)} – ${end.toLocaleDateString("de-DE", opts)}`;
 }
 
-function renderWeeklyTable(totalPoints, perStockPoints) {
+// A stock's weekly value also moves when shares are bought or sold, and a month later nobody
+// remembers that the big red week was a sale (WDC, 05.10.2026: a third sold, and the cell read
+// as a crash). So each week with a trade carries a marker, details on hover, and loses its
+// green/red, which would be reporting the trade as a price move. Built from records the tool
+// already keeps: current lots and `lots_sold` (purchases, summed per day so a lot that was
+// later partly sold still counts in full), and the sales themselves.
+function tradesByTickerWeek(holdings, sales) {
+  const out = {};
+  const entry = (ticker, week) => {
+    out[ticker] = out[ticker] || {};
+    return (out[ticker][week] = out[ticker][week] || { bought: {}, sold: [] });
+  };
+  const addBuy = (ticker, lot) => {
+    const date = (lot.purchase_date || "").slice(0, 10);
+    if (!date) return;
+    const bought = entry(ticker, isoWeekStart(date)).bought;
+    const day = (bought[date] = bought[date] || { shares: 0, eur: 0 });
+    day.shares += lot.shares || 0;
+    day.eur += (lot.shares || 0) * (lot.cost_basis || 0);
+  };
+  for (const h of holdings || []) for (const lot of h.lots || []) addBuy(h.ticker, lot);
+  for (const s of sales || []) {
+    for (const lot of s.lots_sold || []) addBuy(s.ticker, lot);
+    const date = (s.sell_datetime || s.sell_date || "").slice(0, 10);
+    if (date) entry(s.ticker, isoWeekStart(date)).sold.push({ date, shares: s.shares_sold, eur: s.total_sum });
+  }
+  return out;
+}
+
+function tradeMarker(t) {
+  if (!t) return "";
+  const lines = [];
+  for (const s of t.sold) {
+    lines.push(`Sold ${fmt(s.shares)} shares for ${fmt(s.eur)} EUR on ${fmtDate(s.date)}.`);
+  }
+  for (const [date, b] of Object.entries(t.bought).sort()) {
+    lines.push(`Bought ${fmt(b.shares)} shares for ${fmt(b.eur)} EUR on ${fmtDate(date)}.`);
+  }
+  if (!lines.length) return "";
+  lines.push("The change in this week's value is partly the trade, not the price.");
+  const label = [t.sold.length ? "↓ sold" : "", Object.keys(t.bought).length ? "+ bought" : ""].filter(Boolean).join(" ");
+  return ` <span class="trade-mark" title="${escapeHtml(lines.join("\n"))}">${label}</span>`;
+}
+
+function renderWeeklyTable(totalPoints, perStockPoints, sales) {
   const container = document.getElementById("weekly-table-container");
   if (!totalPoints || totalPoints.length === 0) {
     container.innerHTML = `<p class="empty">No history yet — builds up as you refresh each day.</p>`;
@@ -699,6 +744,8 @@ function renderWeeklyTable(totalPoints, perStockPoints) {
   for (const t of tickers) {
     perTickerByWeek[t] = aggregateWeekly(perStockPoints.filter((p) => p.ticker === t));
   }
+
+  const trades = tradesByTickerWeek(activeHoldings(), sales);
 
   const allWeeks = [...totalByWeek.keys()].sort().reverse();
   const weeks = allWeeks.slice(0, weeklyTableWeeksShown);
@@ -716,8 +763,9 @@ function renderWeeklyTable(totalPoints, perStockPoints) {
     html += `<tr><td>${weekRangeLabel(w)}</td><td class="${totalClass}"><strong>${totalP ? fmt(totalP.value) : "–"}</strong></td>`;
     for (const t of tickers) {
       const p = perTickerByWeek[t].get(w);
-      const cellClass = isLatest ? weeklyChangeClass(p, prevWeek && perTickerByWeek[t].get(prevWeek)) : "";
-      html += `<td class="${cellClass}">${p ? fmt(p.value) : "–"}</td>`;
+      const marker = p ? tradeMarker((trades[t] || {})[w]) : "";
+      const cellClass = isLatest && !marker ? weeklyChangeClass(p, prevWeek && perTickerByWeek[t].get(prevWeek)) : "";
+      html += `<td class="${cellClass}">${p ? fmt(p.value) : "–"}${marker}</td>`;
     }
     html += `</tr>`;
   }
