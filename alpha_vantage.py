@@ -173,6 +173,14 @@ def prices_cached_today(ticker: str) -> bool:
     return bool(cached) and cached.get("fetched_date") == date.today().isoformat()
 
 
+def cached_closes(ticker: str) -> dict:
+    """{date: close} from whatever this ticker's cache holds, however old. Never fetches —
+    for readings that should cost nothing and can live with history that stops a few days
+    back."""
+    cached = _load_price_history_cache().get(ticker) or {}
+    return {p["date"]: p["close"] for p in cached.get("prices", [])}
+
+
 def fetch_daily_prices(ticker: str, days: int = 30) -> list:
     """Daily OHLCV bars for a ticker, oldest first, in USD. Cached per ticker per day
     since this shares Alpha Vantage's 25-requests/day free-tier cap with sentiment.

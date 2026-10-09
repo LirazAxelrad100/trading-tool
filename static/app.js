@@ -1663,6 +1663,37 @@ async function checkOldVsActive() {
   }
 }
 
+// Is the "security" actually a cushion? Lines the old holdings up against the AI bloc's worst
+// days, and names the single worst bloc day — when the long-predicted big fall comes, it
+// shows up there by itself. Free (recorded values plus cached closes), so it loads on its own.
+async function loadCushion() {
+  const host = document.getElementById("old-cushion");
+  try {
+    const res = await fetch("/api/concentration/cushion");
+    const c = await res.json();
+    if (!res.ok || c.error) {
+      host.innerHTML = `<p class="subtitle">${escapeHtml(c.error || c.detail || "Couldn't read it.")}</p>`;
+      return;
+    }
+    const name = (s) => s.replace(/,? Inc\.?$/, "").replace(/ Platforms$/, "");
+    const companies = c.companies
+      .map((r) => `${escapeHtml(name(r.company))} ${coloredPct(r.avg_pct)} <span class="subtitle">(fell on ${r.fell_on} of ${r.of_days})</span>`)
+      .join(" · ");
+    const w = c.worst_day;
+    const note = c.used_cached_prices
+      ? ` title="Before 01.10 the old holdings' daily moves come from cached US prices in dollars, so a little currency movement is mixed in. The tool's own records take over as days build up."`
+      : "";
+    host.innerHTML = `
+      <p>On the ${c.days_used} days your AI bloc (${c.bloc.join(" · ")}) fell most, it averaged ${coloredPct(c.bloc_avg_pct)}.
+        Your old holdings averaged ${coloredPct(c.old.avg_pct)} and fell on ${c.old.fell_on} of those ${c.old.of_days} days.</p>
+      <p>${companies}</p>
+      <p>Worst bloc day so far: <strong>${fmtDate(w.date)}</strong>, bloc ${coloredPct(w.bloc_pct)}, old holdings ${coloredPct(w.old_pct)}.</p>
+      <p class="subtitle"${note}>${c.days} trading days, ${fmtDate(c.from_date)}–${fmtDate(c.to_date)}. Updates by itself — when a big fall comes, it will show here as the worst day.</p>`;
+  } catch (e) {
+    host.innerHTML = `<p class="subtitle">Couldn't read it: ${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
 function renderOldHoldings(old, activeTotal) {
   const panel = document.getElementById("old-holdings-panel");
   const everything = document.getElementById("everything-line");
@@ -1715,6 +1746,7 @@ function renderOldHoldings(old, activeTotal) {
   )} · old holdings ${fmtPct(all ? oldTotal / all : 0)}.`;
   everything.style.display = "block";
   panel.style.display = "block";
+  loadCushion();
 }
 
 async function editHolding(id) {
@@ -3813,8 +3845,7 @@ async function loadHistory() {
       <td>${fmt(e.cost_basis)}</td>
       <td>${fmt(e.total_spend)}</td>
       <td>${fmt(e.sale_price)}</td>
-      <td>${fmt(e.total_sum)}</td>
-      <td class="${gainClass}">${fmt(e.realized_gain)}</td>
+      <td>${fmt(e.total_sum)} <span class="subtitle">→</span> <span class="${gainClass}">${fmt(e.realized_gain)}</span></td>
       <td>${fmtSellDatetime(e.sell_datetime)}</td>
       <td><button class="danger" onclick="removeSalesEntry('${e.id}')">Remove</button></td>
     `;

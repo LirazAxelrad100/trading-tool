@@ -107,6 +107,8 @@
       </div>
       <p id="old-share-classes" class="subtitle share-class-note"></p>
       <p class="total-line">Old holdings total: <strong id="old-total">0,00</strong></p>
+      <h3 class="checklist-heading">On your AI bloc's worst days</h3>
+      <div id="old-cushion"></div>
       <h3 class="checklist-heading">Do they move with your active holdings?</h3>
       <div id="old-vs-active"><p class="subtitle"><button class="secondary" onclick="checkOldVsActive()">Check</button> uses up to one Alpha Vantage call per company the first time each day, until the tool has recorded enough days of its own</p></div>
     </div>
@@ -301,8 +303,7 @@
             <th>Bought at</th>
             <th>Paid</th>
             <th>Sold at</th>
-            <th>Received</th>
-            <th>Profit / loss</th>
+            <th title="The full amount the sale paid you, then how much of it was profit (or loss) — the rest was your own money coming back.">Received → profit / loss</th>
             <th>Sold on</th>
             <th></th>
           </tr>

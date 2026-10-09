@@ -498,3 +498,108 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None) -> dict
         "independent": singles,
         "excluded": excluded,
     }
+
+
+def cushion(active: list, old: list, history: list, sales: list, company_of: dict,
+            cached_closes: dict) -> dict:
+    """On the AI bloc's worst days, what did the old holdings do?
+
+    The question behind it (2026-10-09): every week someone predicts the AI rally will end in
+    a big fall, and the old holdings are what she calls her security. A cushion is only worth
+    trusting if it can be seen working, so this lines the two up on the days that matter —
+    the bloc's worst 25% — and names the single worst bloc day, which is where a real fall
+    will show up when it comes.
+
+    Free. The bloc is analyze()'s largest group, from recorded values. The old holdings have
+    been recorded only since 2026-10-01, so for earlier days their returns come from whatever
+    Alpha Vantage closes are already cached (never fetched here). Those are USD while the
+    recorded values are EUR, so a little currency leaks in on the cached days; the recorded
+    days take over as they build up."""
+    base = analyze(active, history, sales)
+    if base.get("error") or not base.get("groups"):
+        return {"error": base.get("error") or "No bloc of holdings moving together right now."}
+    bloc = base["groups"][0]["tickers"]
+
+    dates = [d for d in _window(sorted({p["date"] for p in history}))
+             if datetime.date.fromisoformat(d).weekday() < 5]
+    by_ticker = collections.defaultdict(dict)
+    for p in history:
+        by_ticker[p["ticker"]][p["date"]] = p["value"]
+
+    def weighted(series: dict, weights: dict) -> list:
+        """Weight-weighted mean of simple daily returns, over whoever has one that day."""
+        out = []
+        for i in range(len(dates) - 1):
+            parts = [(weights[t], s[i]) for t, s in series.items() if s[i] is not None]
+            carried = sum(w for w, _ in parts)
+            out.append(sum(w * r for w, r in parts) / carried if carried else None)
+        return out
+
+    def simple(series: list) -> list:
+        return [math.exp(r) - 1 if r is not None else None for r in series]
+
+    bloc_holdings = [h for h in active if h["ticker"] in bloc]
+    bloc_series = {t: simple(s) for t, s in _series_by_ticker(bloc_holdings, by_ticker, sales, dates).items()}
+    bloc_weights = {h["ticker"]: h["shares"] * h["current_price"] for h in bloc_holdings}
+    bloc_returns = weighted(bloc_series, bloc_weights)
+
+    # Old holdings never change shares, so a recorded value moves exactly with price. Each
+    # day's return prefers the recorded pair and falls back to the cached closes.
+    old_series, used_cache = {}, False
+    for h in old:
+        t = h["ticker"]
+        rec, closes = by_ticker.get(t, {}), cached_closes.get(t, {})
+        series = []
+        for prev, day in zip(dates, dates[1:]):
+            if rec.get(prev) and rec.get(day):
+                series.append(rec[day] / rec[prev] - 1)
+            elif closes.get(prev) and closes.get(day):
+                series.append(closes[day] / closes[prev] - 1)
+                used_cache = True
+            else:
+                series.append(None)
+        old_series[t] = series
+    old_weights = {h["ticker"]: h["shares"] * h["current_price"] for h in old}
+    old_returns = weighted(old_series, old_weights)
+
+    companies = collections.defaultdict(list)
+    for h in old:
+        companies[company_of[h["ticker"]]].append(h["ticker"])
+    company_returns = {
+        name: weighted({t: old_series[t] for t in tickers}, {t: old_weights[t] for t in tickers})
+        for name, tickers in companies.items()
+    }
+
+    days = [i for i in range(len(dates) - 1) if bloc_returns[i] is not None and old_returns[i] is not None]
+    if len(days) < MIN_WORST_DAYS * 2:
+        return {"error": "Not enough days with both the bloc and the old holdings recorded yet."}
+    count = max(MIN_WORST_DAYS, int(len(days) * WORST_DAY_SHARE))
+    worst = sorted(days, key=lambda i: bloc_returns[i])[:count]
+
+    def summary(returns: list) -> dict:
+        picked = [returns[i] for i in worst if returns[i] is not None]
+        return {
+            "avg_pct": statistics.mean(picked) * 100 if picked else None,
+            "fell_on": sum(1 for r in picked if r < 0),
+            "of_days": len(picked),
+        }
+
+    rows = [{"company": name, **summary(r)} for name, r in company_returns.items()]
+    rows.sort(key=lambda r: -(r["avg_pct"] if r["avg_pct"] is not None else -999))
+    low = worst[0]
+    return {
+        "bloc": bloc,
+        "days": len(days),
+        "from_date": dates[days[0] + 1],
+        "to_date": dates[days[-1] + 1],
+        "days_used": count,
+        "bloc_avg_pct": statistics.mean(bloc_returns[i] for i in worst) * 100,
+        "old": summary(old_returns),
+        "companies": rows,
+        "worst_day": {
+            "date": dates[low + 1],
+            "bloc_pct": bloc_returns[low] * 100,
+            "old_pct": old_returns[low] * 100,
+        },
+        "used_cached_prices": used_cache,
+    }

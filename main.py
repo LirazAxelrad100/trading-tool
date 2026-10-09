@@ -1689,6 +1689,22 @@ def compare_old_holdings():
     return results
 
 
+@app.get("/api/concentration/cushion")
+def get_cushion():
+    """What the old holdings did on the AI bloc's worst days. Free: recorded values plus
+    whatever Alpha Vantage closes are already cached, never a new call."""
+    holdings = load_holdings()
+    old = [h for h in holdings if is_old(h)]
+    if not old:
+        return {"error": "No old holdings."}
+    universe = opportunities_b.load_universe()
+    return concentration.cushion(
+        active_only(holdings), old, load_holdings_history(), load_sales_history(),
+        {h["ticker"]: company_of(h["ticker"], universe) for h in old},
+        {h["ticker"]: alpha_vantage.cached_closes(h["ticker"]) for h in old},
+    )
+
+
 @app.get("/api/concentration")
 def get_concentration():
     """Which holdings move together. Reads only stored history, so it costs no API calls."""
