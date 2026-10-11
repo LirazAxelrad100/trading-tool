@@ -385,3 +385,7 @@ td.nowrap { white-space: nowrap; }
 /* Her sizing rules, one line under each watch-list row — attached to the row above it. */
 tr.has-rule-line td { border-bottom: none; padding-bottom: 0.15rem; }
 tr.watch-rule-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted); }
+
+/* A holding's plain status, one line under its row (attached to the row above). */
+tr.has-status-line td { border-bottom: none; padding-bottom: 0.15rem; }
+tr.status-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted); }

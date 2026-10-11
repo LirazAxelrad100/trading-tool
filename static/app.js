@@ -1496,7 +1496,9 @@ async function render() {
     }
     tr.innerHTML = `
       <td><span class="ticker-name" onclick="showConsensus('${h.id}')">${h.ticker}</span></td>
-      <td>${fmtShares(h.shares)}${h.lots && h.lots.length > 1 ? ` <span class="lots-link" onclick="openLotsModal('${h.id}')">(${h.lots.length} lots)</span>` : ""}</td>
+      <td><span class="ticker-name" onclick="openLotsModal('${h.id}')" title="${
+        h.lots && h.lots.length > 1 ? `Bought in ${h.lots.length} lots — click to see them` : "Click to see the purchase"
+      }">${fmtShares(h.shares)}</span></td>
       <td>${fmt(h.cost_basis)}</td>
       <td>${h.purchase_date}</td>
       <td>${fmt(h.stop_price)}</td>
@@ -1510,7 +1512,7 @@ async function render() {
       <td>
         <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
         ${!h.isin && h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
-        <button class="secondary" onclick="openLotsModal('${h.id}')">Lots</button>
+        <button class="secondary" onclick="boughtMore('${h.id}')" title="Add a new purchase of this stock">Bought more</button>
         <button class="secondary" onclick="openThesisModal('${h.id}', 'holding')" title="${
           h.why ? "Why you own this" : "Not written down yet"
         }">Why${h.why ? " ✓" : ""}</button>
@@ -1518,7 +1520,9 @@ async function render() {
         <button class="danger" onclick="sellHolding('${h.id}')">Sell</button>
       </td>
     `;
+    tr.dataset.holdingId = h.id;
     body.appendChild(tr);
+    if (holdingStatus[h.id]) attachStatusLine(tr, holdingStatus[h.id]);
   }
 
   document.getElementById("grand-total").textContent = fmt(grandTotal);
@@ -2004,31 +2008,6 @@ function promoteWatchItem(id) {
   document.getElementById("f-shares").focus();
 }
 
-// The stop line answers "is anything wrong today". This adds "where is this going", so one
-// glance at the alerts carries both horizons — and it lives here rather than in the Analyze
-// popup because the alerts are what gets read daily, while opening Analyze costs an LLM call.
-//
-// It gets its **own line**, not an appended clause. A first version glued it onto the stop
-// sentence and the user was right that it read oddly: two unrelated facts sharing one
-// sentence look connected. Same fault as the 3-month move sitting mid-paragraph in
-// renderFundamentals, where adjacency implied a cause.
-//
-// Only next year here — one number keeps a quiet status quiet. The this-year/next-year pair
-// belongs where candidates are compared (Analyze, watch list), not in a daily all-clear.
-//
-// Silent when the ticker is not in a Zacks Growth export, since that is the user's own
-// manual export and a missing line is better than a dash she has to interpret.
-function growthLine(result) {
-  const g = result.growth_next_year_pct;
-  if (g == null) return null;
-  const line = document.createElement("div");
-  line.className = "subtitle";
-  line.textContent = `Analysts expect profit to ${g >= 0 ? "grow" : "fall"} ${fmtPct(
-    Math.abs(g) / 100
-  )} next year.`;
-  return line;
-}
-
 // The stop-hit panel's "is this a normal swing?" question, answered with the stock's typical
 // daily move so a 0,1% breach can be read against it. Spends one Alpha Vantage call the first
 // time a ticker is checked each day (cached after), which is fine for a panel this rare.
@@ -2045,10 +2024,46 @@ async function fillStopSwing(id, ticker) {
   }
 }
 
+// The plain "nothing to do" status of each holding, kept so a re-render of the table can put
+// it back under its row. Alerts that need a decision (stop hit, new high) stay as panels.
+const holdingStatus = {};
+
+// One muted line under the holding's row, starting under the ticker — her call (2026-10-11):
+// a separate panel per holding repeated every ticker and read as a second table. Separate
+// facts joined by " · ", never one sentence: an earlier version glued next year's profit onto
+// the stop sentence and the two read as connected. Only next year — one number keeps a quiet
+// status quiet; silent when the ticker isn't in a Zacks Growth export.
+function attachStatusLine(tr, result) {
+  tr.nextElementSibling?.classList.contains("status-line") && tr.nextElementSibling.remove();
+  const dayWord = result.day_change_pct >= 0 ? "up" : "down";
+  const parts = [];
+  if (result.day_change_pct != null) parts.push(`${dayWord} ${fmtPct(Math.abs(result.day_change_pct))} today`);
+  parts.push(`${fmtPct(result.pct_above_stop)} above stop loss`);
+  const g = result.growth_next_year_pct;
+  if (g != null) parts.push(`analysts expect profit to ${g >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(g) / 100)} next year`);
+  const sub = document.createElement("tr");
+  sub.className = "status-line";
+  const td = document.createElement("td");
+  td.colSpan = tr.children.length;
+  td.textContent = parts.join(" · ");
+  sub.appendChild(td);
+  tr.classList.add("has-status-line");
+  tr.after(sub);
+}
+
+function clearStatusLine(id) {
+  delete holdingStatus[id];
+  const tr = document.querySelector(`#holdings-body tr[data-holding-id="${id}"]`);
+  if (!tr) return;
+  tr.classList.remove("has-status-line");
+  if (tr.nextElementSibling?.classList.contains("status-line")) tr.nextElementSibling.remove();
+}
+
 function renderFlag(id, result) {
   const flagsDiv = document.getElementById("flags");
   const existing = document.getElementById(`flag-${id}`);
   if (existing) existing.remove();
+  clearStatusLine(id);
 
   if (result.skipped_manual) return;
   // Old holdings carry no stop, so there is no status line to draw for them.
@@ -2116,19 +2131,9 @@ function renderFlag(id, result) {
   }
 
   if (!result.triggered) {
-    const note = document.createElement("div");
-    note.id = `flag-${id}`;
-    note.className = "panel no-trigger";
-    const dayWord = result.day_change_pct >= 0 ? "up" : "down";
-    const dayClause = result.day_change_pct == null ? "" : `is ${dayWord} by ${fmtPct(Math.abs(result.day_change_pct))} today, and `;
-    const stopLine = document.createElement("div");
-    stopLine.textContent = `${result.ticker} ${dayClause}is ${fmtPct(
-      result.pct_above_stop
-    )} above stop loss, no change is needed.`;
-    note.appendChild(stopLine);
-    const growth = growthLine(result);
-    if (growth) note.appendChild(growth);
-    flagsDiv.prepend(note);
+    holdingStatus[id] = result;
+    const tr = document.querySelector(`#holdings-body tr[data-holding-id="${id}"]`);
+    if (tr) attachStatusLine(tr, result);
     return;
   }
 
@@ -3578,6 +3583,13 @@ function renderLotsModalBody(h) {
       <tr><th>Shares</th><th>Buy in</th><th>Date</th><th>Value now</th><th></th></tr>
       ${rows}
     </table>`;
+}
+
+// The lots window, opened at its "Add a purchase" form. Same window as clicking the share
+// count, which is for looking; this button names the action so buying more stays findable.
+function boughtMore(id) {
+  openLotsModal(id);
+  document.getElementById("lot-shares")?.focus();
 }
 
 function editLot(i) {
