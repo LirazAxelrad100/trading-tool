@@ -2616,7 +2616,7 @@ function renderWatchRules(d) {
   host.innerHTML = `<p class="subtitle"><strong>Your rules:</strong> about ${r.target_pct}% per stock (${ruleEur(
     (d.active_total * r.target_pct) / 100
   )} today), less for wild stocks, so a stop loss never loses more than ${ruleEur(r.max_stop_loss_eur)}.${
-    d.bloc ? ` No new money into your AI group (${escapeHtml(d.bloc.tickers.join(" · "))}).` : ""
+    d.bloc ? ` No new AI companies. Your AI stocks (${escapeHtml(d.bloc.tickers.join(" · "))}) move together, and the line under each ticker says if it moves with them.` : ""
   }${review}${
     missing.length
       ? ` <button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ${missing.length} without enough data (${missing.length} of your 25 daily price lookups).`
@@ -2643,13 +2643,16 @@ function watchRuleLine(row) {
   } else {
     parts.push(`Your rules: <span class="subtitle">not enough data yet</span>`);
   }
-  // Yes / no. The one exception is a stock that moves with something already owned outside
-  // the AI group — PBF with VLO is the DK situation again, worth one short note.
+  // How the price moves, never what the company does. The tool can't tell an AI company
+  // from one that only trades like them — KEYS is not AI, yet moves with the AI stocks — so
+  // this is information in amber, not a rule breach. Whether a company is AI is her call,
+  // and her #tags hold it. The one extra note is a stock moving with something she owns
+  // outside that group: PBF with VLO is the DK situation again.
   if (row.bloc === "joins")
-    parts.push(`<span class="price-down" title="Moves with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days.">in your AI group — against your rule</span>`);
-  else if (row.bloc === "moves_with") parts.push(`not in your AI group, but moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
-  else if (row.bloc === "leans" || row.bloc === "own") parts.push("not in your AI group");
-  else if (row.level) parts.push(`<span class="subtitle">AI group: not enough data yet</span>`);
+    parts.push(`<span class="sig-mid" title="Its price has moved with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days, so on a bad day for your AI stocks it would likely fall with them — whatever the company does.">moves with your AI stocks</span>`);
+  else if (row.bloc === "moves_with") parts.push(`moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
+  else if (row.bloc === "leans" || row.bloc === "own") parts.push("moves on its own");
+  else if (row.level) parts.push(`<span class="subtitle">how it moves: not enough data yet</span>`);
   return parts.join(" · ");
 }
 
