@@ -328,10 +328,6 @@ class ConfirmRequest(BaseModel):
     new_stop_price: float
 
 
-class StopWidthIn(BaseModel):
-    width_pct: float
-
-
 class SellRequest(BaseModel):
     shares_sold: float
     total_sum: float
@@ -1186,32 +1182,7 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
     if triggered:
         result["suggested_new_stop"] = current_price * (1 - holding["trailing_pct"])
     result["analyst_consensus"] = holding.get("consensus")
-    result["stop_rule"] = stop_rule(holding, current_price)
     return result
-
-
-def stop_rule(holding: dict, current_price: float) -> Optional[dict]:
-    """Her stop-loss width for this stock's volatility level (risk.STOP_BY_LEVEL), next to the
-    one the holding uses, with what each would lose if it fired. Only when they differ, and
-    only from cached prices, so a refresh never spends a call. She decides per holding
-    (2026-10-11): applying the rule everywhere would put PLTR's stop 31% below today, a loss
-    well past her per-stock maximum, so the tool shows both and changes nothing on its own.
-    The real stop is her order at Trade Republic; this only informs."""
-    vol = risk.level_from_cache(holding["ticker"])
-    if not vol:
-        return None
-    width = vol["width"]
-    if abs(width - holding["trailing_pct"] * 100) < 0.5:
-        return None
-    rule_stop = holding["reference_high"] * (1 - width / 100)
-    return {
-        "level": vol["level"],
-        "width": width,
-        "current_width": holding["trailing_pct"] * 100,
-        "stop": rule_stop,
-        "loss_now": holding["shares"] * (current_price - holding["stop_price"]),
-        "loss_rule": holding["shares"] * (current_price - rule_stop),
-    }
 
 
 def update_price(holding: dict, new_price: float) -> None:
@@ -1474,23 +1445,6 @@ def confirm_trailing_stop(holding_id: str, req: ConfirmRequest):
     holding = find_holding(holdings, holding_id)
     holding["reference_high"] = req.new_reference_high
     holding["stop_price"] = req.new_stop_price
-    save_holdings(holdings)
-    return holding
-
-
-@app.post("/api/holdings/{holding_id}/stop-width")
-def set_stop_width(holding_id: str, req: StopWidthIn):
-    """Use a different stop-loss width — her rule's, from the stop panel. Keeps the reference
-    high and moves the stop with it, and stores the width so later trailing suggestions use
-    it too. Only on her click; the order at Trade Republic is hers to change."""
-    if not 1 <= req.width_pct <= 60:
-        raise HTTPException(status_code=422, detail="Stop loss width must be between 1% and 60%.")
-    holdings = load_holdings()
-    holding = find_holding(holdings, holding_id)
-    if is_old(holding) or holding.get("reference_high") is None:
-        raise HTTPException(status_code=422, detail="This holding has no stop loss.")
-    holding["trailing_pct"] = req.width_pct / 100
-    holding["stop_price"] = holding["reference_high"] * (1 - req.width_pct / 100)
     save_holdings(holdings)
     return holding
 
