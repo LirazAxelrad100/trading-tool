@@ -7,6 +7,7 @@ from pathlib import Path
 import main
 import notifier
 import prices
+import zacks_import
 
 RETRY_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 20
@@ -144,6 +145,50 @@ def format_dividends(due: list) -> list:
     return lines
 
 
+CHECKPOINTS_FILE = Path(__file__).parent / "data" / "checkpoints.json"
+
+
+def checkpoint_emails() -> None:
+    """Questions she wrote down before a company's quarterly report, sent back to her a couple
+    of days after it (2026-10-11). Rules answer "how much"; this answers "when do I sit down
+    and what do I look at" — the report is when real news arrives and analysts revise, and a
+    question written before the result can't be bent to fit it afterwards. One email per
+    question, its own subject so it stands out from the stop check, with the next-year profit
+    estimate from when she wrote it beside the latest export. Marked sent only after the email
+    went out, so a failed send tries again tomorrow. The file is hers (data/, not in git)."""
+    if not CHECKPOINTS_FILE.exists():
+        return
+    checkpoints = json.loads(CHECKPOINTS_FILE.read_text())
+    today = date.today().isoformat()
+    growth = json.loads(zacks_import.GROWTH_FILE.read_text()) if zacks_import.GROWTH_FILE.exists() else {}
+    changed = False
+    for cp in checkpoints:
+        if cp.get("sent_on") or cp["remind_on"] > today:
+            continue
+        g = (growth.get("growth") or {}).get(cp["ticker"], {})
+        exported = (g.get("imported_at") or "")[:10]
+        lines = [
+            f"{cp['ticker']} reported on {eu_date(cp['report_date'])}. On {eu_date(cp['written_on'])} you wrote down:",
+            "",
+            f"  {cp['question']}",
+            "",
+        ]
+        if g.get("next_fy_est") is not None and cp.get("next_fy_est_then") is not None:
+            then, now = cp["next_fy_est_then"], g["next_fy_est"]
+            lines.append(
+                f"Next year's expected profit per share: {eu_num(then)} when you wrote it, "
+                f"{eu_num(now)} in your export of {eu_date(exported)} ({'+' if now > then else ''}{eu_pct((now - then) / then)})."
+            )
+        if exported and exported < cp["report_date"]:
+            lines.append("Your latest Zacks export is from before the report, so export again before deciding.")
+        lines += ["", "About 10 minutes: read the question, look at the numbers, decide."]
+        if send_email_with_retry(f"Decision time: {cp['ticker']} — the question you wrote on {eu_date(cp['written_on'])}", "\n".join(lines)):
+            cp["sent_on"] = today
+            changed = True
+    if changed:
+        CHECKPOINTS_FILE.write_text(json.dumps(checkpoints, indent=2, ensure_ascii=False))
+
+
 def run() -> None:
     holdings = main.load_holdings()
     before = copy.deepcopy(holdings)
@@ -220,6 +265,12 @@ def run() -> None:
     except Exception as e:
         print(f"dividend reminder skipped: {e}")
         dividends_due = []
+
+    # Its own email, and like the dividend reminder it must never cost the stop check its run.
+    try:
+        checkpoint_emails()
+    except Exception as e:
+        print(f"checkpoint reminder skipped: {e}")
 
     if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")
