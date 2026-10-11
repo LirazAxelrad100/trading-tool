@@ -1,6 +1,7 @@
 import math
 import statistics
 from datetime import date
+from typing import Optional
 
 import alpha_vantage
 
@@ -81,6 +82,22 @@ def stop_default(ticker: str) -> dict:
         "fires": (stops.get("fires") or {}).get(width),
         "days": stops.get("days"),
     }
+
+
+def level_from_cache(ticker: str, days: int = 90) -> Optional[dict]:
+    """The volatility level from whatever closes are already cached, however old — never a
+    call. A level moves slowly, so a few weeks' staleness doesn't change the band, and the
+    watch list's rules panel reads fourteen tickers at once against a 25/day budget.
+    `as_of` is the cache's last close, shown so an old reading is visible."""
+    closes_by_date = alpha_vantage.cached_closes(ticker)
+    dates = sorted(closes_by_date)[-days:]
+    if len(dates) < 40:
+        return None
+    closes = [closes_by_date[d] for d in dates]
+    returns = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+    annualized_pct = statistics.pstdev(returns) * math.sqrt(252) * 100
+    label = next((lbl for cutoff, lbl in VOL_BANDS if annualized_pct < cutoff), "Very high")
+    return {"level": label, "width": STOP_BY_LEVEL[label], "as_of": dates[-1]}
 
 
 def stop_history(ticker: str, cached_only: bool = False) -> dict:

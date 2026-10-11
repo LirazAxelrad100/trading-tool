@@ -2286,6 +2286,7 @@ async function loadWatchlist() {
   watchlist = await res.json();
   renderWatchlist();
   loadWatchArchive();
+  loadWatchRules();
 }
 
 function watchSortBy(field) {
@@ -2565,6 +2566,106 @@ function renderProfitVsPrice() {
         ? `<p class="subtitle">No profit figures available for ${escapeHtml(missing.join(", "))}.</p>`
         : ""
     }`;
+}
+
+// Each watch-list ticker against her own sizing rules (2026-10-11): how much the rules allow,
+// and whether it would join the big bloc she has said no new money goes into. Her rules, not
+// the tool's — the numbers live in data/sizing_rules.json. Free on load; Check spends one
+// Alpha Vantage call per ticker that has no usable prices yet.
+async function loadWatchRules() {
+  const host = document.getElementById("watch-rules");
+  if (!host) return;
+  try {
+    const res = await fetch("/api/watchlist/rules");
+    const d = await res.json();
+    if (!res.ok || d.error) {
+      host.innerHTML = d.error ? `<p class="subtitle">${escapeHtml(d.error)}</p>` : "";
+      return;
+    }
+    renderWatchRules(d);
+  } catch (e) {
+    host.innerHTML = `<p class="subtitle">Couldn't check your rules: ${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
+function renderWatchRules(d) {
+  const host = document.getElementById("watch-rules");
+  const r = d.rules;
+  const eur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
+
+  // One amount, with the reasoning on hover. "Stop loss" throughout — the same words as the
+  // rest of the tool; a second name for the same thing ("stop-out") only added confusion.
+  const amountCell = (row) => {
+    if (!row.level) return `<span class="subtitle">not enough data yet</span>`;
+    const why =
+      row.limited_by === "risk"
+        ? `${row.level} swings, so your stop loss is ${row.width}%. ${eur(row.amount)} × ${row.width}% = ${eur(row.stop_loss_eur)}, the most you want to lose on one stock.`
+        : `${r.target_pct}% of your portfolio. ${row.level} swings, so your stop loss is ${row.width}% — at most ${eur(row.stop_loss_eur)} lost.`;
+    return `<strong title="${escapeHtml(why)}">${eur(row.amount)}</strong>`;
+  };
+
+  // Her width for the stock's volatility level, the same number the Add form fills in.
+  const stopCell = (row) =>
+    row.level
+      ? `<span title="${escapeHtml(row.level)} swings — your stop loss for that level.">${row.width}%</span>`
+      : `<span class="subtitle">—</span>`;
+
+  // The amount times the stop loss: what that buy would cost if the stop fired. Before tax —
+  // a loss goes into the loss pot and saves about a quarter of it on later profits.
+  const lossCell = (row) =>
+    row.level
+      ? `<span class="price-down" title="Before tax. A loss goes into your loss pot and lowers the tax on later profits, so it costs you about a quarter less in the end. A gap overnight can sell below the stop loss.">−${eur(row.stop_loss_eur)}</span>`
+      : `<span class="subtitle">—</span>`;
+
+  // Yes / no. The one exception is a stock that moves with something already owned outside
+  // the AI group — PBF with VLO is the DK situation again, worth one short note.
+  const groupCell = (row) => {
+    if (row.bloc === "joins")
+      return `<span class="price-down" title="Moves with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days.">yes — against your rule</span>`;
+    if (row.bloc === "moves_with")
+      return `no <span class="subtitle">— but moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own</span>`;
+    if (row.bloc === "leans" || row.bloc === "own") return "no";
+    return `<span class="subtitle">not enough data yet</span>`;
+  };
+
+  const missing = d.rows.filter((row) => !row.level || !row.bloc || row.bloc === "too_few_days").map((row) => row.ticker);
+  const review = d.review.length
+    ? `<p class="subtitle">${d.review
+        .map((h) => `<strong>${escapeHtml(h.ticker)}</strong> (${fmtPct(h.pct / 100)})`)
+        .join(", ")} is past your ${r.review_pct}% review line.</p>`
+    : "";
+
+  host.innerHTML = `
+    <h3>Against your rules</h3>
+    <p class="subtitle">About ${r.target_pct}% per stock (${eur((d.active_total * r.target_pct) / 100)} today), less for wild stocks, so a stop loss never loses more than ${eur(
+      r.max_stop_loss_eur
+    )}.${d.bloc ? ` No new money into your AI group (${escapeHtml(d.bloc.tickers.join(" · "))}).` : ""}</p>
+    <table class="consensus-table">
+      <tr><th>Ticker</th><th>Amount by your rules</th><th>Stop loss</th><th>You lose if it fires</th><th>In your AI group?</th></tr>
+      ${d.rows
+        .map((row) => `<tr><td>${escapeHtml(row.ticker)}</td><td>${amountCell(row)}</td><td>${stopCell(row)}</td><td>${lossCell(row)}</td><td>${groupCell(row)}</td></tr>`)
+        .join("")}
+    </table>
+    ${
+      missing.length
+        ? `<p class="subtitle"><button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ones without enough data: ${missing.length} of your 25 daily price lookups.</p>`
+        : ""
+    }
+    ${review}`;
+}
+
+async function checkWatchRules(tickers) {
+  const host = document.getElementById("watch-rules");
+  for (const [i, t] of tickers.entries()) {
+    host.querySelector("button") && (host.querySelector("button").disabled = true);
+    if (i) await new Promise((r) => setTimeout(r, 1500)); // the free key refuses bursts
+    try {
+      await fetch(`/api/risk/stop-default/${encodeURIComponent(t)}`);
+    } catch (e) {
+      /* one failed ticker shouldn't stop the rest */
+    }
+  }
+  await loadWatchRules();
 }
 
 function renderWatchTagFilters() {
