@@ -2277,6 +2277,7 @@ function restoreSubView() {
 }
 
 let watchlist = [];
+let watchRules = null; // GET /api/watchlist/rules, read by watchRuleLine()
 let watchSortField = null;
 let watchTagFilter = null;
 let watchSortDir = 1;
@@ -2387,6 +2388,14 @@ function renderWatchlist() {
     }
     tr.querySelector(".watch-note-cell").appendChild(noteBtn);
     body.appendChild(tr);
+    const rule = watchRules && watchRules.rows.find((x) => x.ticker === w.ticker);
+    if (rule) {
+      tr.classList.add("has-rule-line");
+      const sub = document.createElement("tr");
+      sub.className = "watch-rule-line";
+      sub.innerHTML = `<td></td><td colspan="9">${watchRuleLine(rule)}</td>`;
+      body.appendChild(sub);
+    }
   }
 }
 
@@ -2582,76 +2591,66 @@ async function loadWatchRules() {
       host.innerHTML = d.error ? `<p class="subtitle">${escapeHtml(d.error)}</p>` : "";
       return;
     }
+    watchRules = d;
     renderWatchRules(d);
+    renderWatchlist();
   } catch (e) {
     host.innerHTML = `<p class="subtitle">Couldn't check your rules: ${escapeHtml(e.message || String(e))}</p>`;
   }
 }
 
+const ruleEur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
+
+// The rules sentence above the table, the Check button for tickers without enough data, and
+// the review line. The per-ticker reading sits under each row (watchRuleLine), at her request
+// — a second table repeated every ticker she had just read above it.
 function renderWatchRules(d) {
   const host = document.getElementById("watch-rules");
   const r = d.rules;
-  const eur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
-
-  // One amount, with the reasoning on hover. "Stop loss" throughout — the same words as the
-  // rest of the tool; a second name for the same thing ("stop-out") only added confusion.
-  const amountCell = (row) => {
-    if (!row.level) return `<span class="subtitle">not enough data yet</span>`;
-    const why =
-      row.limited_by === "risk"
-        ? `${row.level} swings, so your stop loss is ${row.width}%. ${eur(row.amount)} × ${row.width}% = ${eur(row.stop_loss_eur)}, the most you want to lose on one stock.`
-        : `${r.target_pct}% of your portfolio. ${row.level} swings, so your stop loss is ${row.width}% — at most ${eur(row.stop_loss_eur)} lost.`;
-    return `<strong title="${escapeHtml(why)}">${eur(row.amount)}</strong>`;
-  };
-
-  // Her width for the stock's volatility level, the same number the Add form fills in.
-  const stopCell = (row) =>
-    row.level
-      ? `<span title="${escapeHtml(row.level)} swings — your stop loss for that level.">${row.width}%</span>`
-      : `<span class="subtitle">—</span>`;
-
-  // The amount times the stop loss: what that buy would cost if the stop fired. Before tax —
-  // a loss goes into the loss pot and saves about a quarter of it on later profits.
-  const lossCell = (row) =>
-    row.level
-      ? `<span class="price-down" title="Before tax. A loss goes into your loss pot and lowers the tax on later profits, so it costs you about a quarter less in the end. A gap overnight can sell below the stop loss.">−${eur(row.stop_loss_eur)}</span>`
-      : `<span class="subtitle">—</span>`;
-
-  // Yes / no. The one exception is a stock that moves with something already owned outside
-  // the AI group — PBF with VLO is the DK situation again, worth one short note.
-  const groupCell = (row) => {
-    if (row.bloc === "joins")
-      return `<span class="price-down" title="Moves with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days.">yes — against your rule</span>`;
-    if (row.bloc === "moves_with")
-      return `no <span class="subtitle">— but moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own</span>`;
-    if (row.bloc === "leans" || row.bloc === "own") return "no";
-    return `<span class="subtitle">not enough data yet</span>`;
-  };
-
   const missing = d.rows.filter((row) => !row.level || !row.bloc || row.bloc === "too_few_days").map((row) => row.ticker);
   const review = d.review.length
-    ? `<p class="subtitle">${d.review
+    ? ` ${d.review
         .map((h) => `<strong>${escapeHtml(h.ticker)}</strong> (${fmtPct(h.pct / 100)})`)
-        .join(", ")} is past your ${r.review_pct}% review line.</p>`
+        .join(", ")} is past your ${r.review_pct}% review line.`
     : "";
+  host.innerHTML = `<p class="subtitle"><strong>Your rules:</strong> about ${r.target_pct}% per stock (${ruleEur(
+    (d.active_total * r.target_pct) / 100
+  )} today), less for wild stocks, so a stop loss never loses more than ${ruleEur(r.max_stop_loss_eur)}.${
+    d.bloc ? ` No new money into your AI group (${escapeHtml(d.bloc.tickers.join(" · "))}).` : ""
+  }${review}${
+    missing.length
+      ? ` <button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ${missing.length} without enough data (${missing.length} of your 25 daily price lookups).`
+      : ""
+  }</p>`;
+}
 
-  host.innerHTML = `
-    <h3>Against your rules</h3>
-    <p class="subtitle">About ${r.target_pct}% per stock (${eur((d.active_total * r.target_pct) / 100)} today), less for wild stocks, so a stop loss never loses more than ${eur(
-      r.max_stop_loss_eur
-    )}.${d.bloc ? ` No new money into your AI group (${escapeHtml(d.bloc.tickers.join(" · "))}).` : ""}</p>
-    <table class="consensus-table">
-      <tr><th>Ticker</th><th>Amount by your rules</th><th>Stop loss</th><th>You lose if it fires</th><th>In your AI group?</th></tr>
-      ${d.rows
-        .map((row) => `<tr><td>${escapeHtml(row.ticker)}</td><td>${amountCell(row)}</td><td>${stopCell(row)}</td><td>${lossCell(row)}</td><td>${groupCell(row)}</td></tr>`)
-        .join("")}
-    </table>
-    ${
-      missing.length
-        ? `<p class="subtitle"><button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ones without enough data: ${missing.length} of your 25 daily price lookups.</p>`
-        : ""
-    }
-    ${review}`;
+// One line under a watch-list row: the amount her rules allow, her stop loss, what she would
+// lose if it fired, and whether it joins her AI group. "Stop loss" throughout — the same words
+// as the rest of the tool; a second name for the same thing only added confusion.
+function watchRuleLine(row) {
+  const r = watchRules.rules;
+  const parts = [];
+  if (row.level) {
+    const why =
+      row.limited_by === "risk"
+        ? `${row.level} swings, so your stop loss is ${row.width}%. ${ruleEur(row.amount)} × ${row.width}% = ${ruleEur(row.stop_loss_eur)}, the most you want to lose on one stock.`
+        : `${r.target_pct}% of your portfolio. ${row.level} swings, so your stop loss is ${row.width}%.`;
+    parts.push(`Your rules: <strong title="${escapeHtml(why)}">${ruleEur(row.amount)}</strong>`);
+    parts.push(`<span title="${escapeHtml(row.level)} swings — your stop loss for that level.">stop loss ${row.width}%</span>`);
+    parts.push(
+      `<span class="price-down" title="Before tax. A loss goes into your loss pot and lowers the tax on later profits, so it costs you about a quarter less in the end. A gap overnight can sell below the stop loss.">−${ruleEur(row.stop_loss_eur)}</span> if it fires`
+    );
+  } else {
+    parts.push(`Your rules: <span class="subtitle">not enough data yet</span>`);
+  }
+  // Yes / no. The one exception is a stock that moves with something already owned outside
+  // the AI group — PBF with VLO is the DK situation again, worth one short note.
+  if (row.bloc === "joins")
+    parts.push(`<span class="price-down" title="Moves with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days.">in your AI group — against your rule</span>`);
+  else if (row.bloc === "moves_with") parts.push(`not in your AI group, but moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
+  else if (row.bloc === "leans" || row.bloc === "own") parts.push("not in your AI group");
+  else if (row.level) parts.push(`<span class="subtitle">AI group: not enough data yet</span>`);
+  return parts.join(" · ");
 }
 
 async function checkWatchRules(tickers) {
