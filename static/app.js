@@ -2029,6 +2029,38 @@ function growthLine(result) {
   return line;
 }
 
+// Her stop-loss width for this stock's swings, beside the one in use, with what each would
+// lose if it fired — only when they differ. She decides per holding (2026-10-11): applying it
+// everywhere would put PLTR's stop 31% below today. A quiet link, not a button, so the plain
+// status line stays plain; nothing changes without her click, and the TR order is hers.
+function stopRuleLine(id, result) {
+  const r = result.stop_rule;
+  if (!r) return null;
+  const eur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
+  const line = document.createElement("div");
+  line.className = "subtitle";
+  const lossNow = result.stop_hit ? "" : ` (today ${Math.round(r.current_width)}%: lose ${eur(r.loss_now)})`;
+  line.innerHTML = `Your rule for ${escapeHtml(r.level.toLowerCase())} swings: ${r.width}% stop loss at ${fmt(r.stop)} — lose ${eur(
+    r.loss_rule
+  )} if it fires${lossNow}. <a href="#" onclick="applyStopRule('${id}', ${r.width}, ${r.stop}); return false;">Use ${r.width}%</a>`;
+  return line;
+}
+
+async function applyStopRule(id, width, stop) {
+  if (!confirm(`Set the stop loss to ${width}% (${fmt(stop)})? Remember to change the order at Trade Republic too.`)) return;
+  const res = await fetch(`${API}/${id}/stop-width`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ width_pct: width }),
+  });
+  if (!res.ok) {
+    alert((await res.json()).detail || "Could not change the stop loss.");
+    return;
+  }
+  document.getElementById(`flag-${id}`)?.remove();
+  await refreshHolding(id);
+}
+
 // The stop-hit panel's "is this a normal swing?" question, answered with the stock's typical
 // daily move so a 0,1% breach can be read against it. Spends one Alpha Vantage call the first
 // time a ticker is checked each day (cached after), which is fine for a panel this rare.
@@ -2110,6 +2142,8 @@ function renderFlag(id, result) {
         <button class="secondary" onclick="document.getElementById('flag-${id}').remove()">Dismiss</button>
       </div>
     `;
+    const rule = stopRuleLine(id, result);
+    if (rule) stopFlag.querySelector(".questions-label").before(rule);
     flagsDiv.prepend(stopFlag);
     fillStopSwing(id, result.ticker);
     return;
@@ -2128,6 +2162,8 @@ function renderFlag(id, result) {
     note.appendChild(stopLine);
     const growth = growthLine(result);
     if (growth) note.appendChild(growth);
+    const rule = stopRuleLine(id, result);
+    if (rule) note.appendChild(rule);
     flagsDiv.prepend(note);
     return;
   }
