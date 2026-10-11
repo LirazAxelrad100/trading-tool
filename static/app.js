@@ -2037,13 +2037,15 @@ function stopRuleLine(id, result) {
   const r = result.stop_rule;
   if (!r) return null;
   const eur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
-  const line = document.createElement("div");
-  line.className = "subtitle";
-  const lossNow = result.stop_hit ? "" : ` (today ${Math.round(r.current_width)}%: lose ${eur(r.loss_now)})`;
-  line.innerHTML = `Your rule for ${escapeHtml(r.level.toLowerCase())} swings: ${r.width}% stop loss at ${fmt(r.stop)} — lose ${eur(
-    r.loss_rule
-  )} if it fires${lossNow}. <a href="#" onclick="applyStopRule('${id}', ${r.width}, ${r.stop}); return false;">Use ${r.width}%</a>`;
-  return line;
+  // Plain words, two lines, prices rather than percentages to compare: the first version
+  // packed level, width, price and two losses into one sentence, and she could not read it.
+  const swings = { Low: "is calm", Moderate: "swings a fair amount", High: "swings a lot", "Very high": "swings a lot" }[r.level] || "swings";
+  const box = document.createElement("div");
+  box.className = "subtitle stop-rule";
+  box.innerHTML = `
+    <div>Your rule: ${escapeHtml(result.ticker)} ${swings}, so its stop loss should be ${r.width}% below its high: <strong>${fmt(r.stop)}</strong> (today: ${fmt(result.current_stop)}).</div>
+    <div>If the stop loss fires, you lose ${eur(r.loss_rule)}${result.stop_hit ? "" : ` (today: ${eur(r.loss_now)})`}. <a href="#" class="stop-rule-link" onclick="applyStopRule('${id}', ${r.width}, ${r.stop}); return false;">Change stop loss to ${fmt(r.stop)}</a></div>`;
+  return box;
 }
 
 async function applyStopRule(id, width, stop) {
