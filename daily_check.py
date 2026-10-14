@@ -165,7 +165,14 @@ def checkpoint_emails() -> None:
     for cp in checkpoints:
         if cp.get("sent_on") or cp["remind_on"] > today:
             continue
-        g = (growth.get("growth") or {}).get(cp["ticker"], {})
+        # A plain reminder (no ticker): her own subject and text, sent as written — e.g.
+        # renewing an exemption order that the bank's app would only accept with an end date.
+        if "subject" in cp:
+            if send_email_with_retry(cp["subject"], cp["body"]):
+                cp["sent_on"] = today
+                changed = True
+            continue
+        g =(growth.get("growth") or {}).get(cp["ticker"], {})
         exported = (g.get("imported_at") or "")[:10]
         lines = [
             f"{cp['ticker']} reported on {eu_date(cp['report_date'])}. On {eu_date(cp['written_on'])} you wrote down:",
