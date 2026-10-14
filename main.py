@@ -1742,64 +1742,20 @@ def compare_concentration(ticker: str, cached_only: bool = False):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/concentration/old")
-def compare_old_holdings():
-    """Do the old holdings move with the active ones, and how do they behave on the active
-    holdings' worst days? One comparison per company (GOOGL and GOOG are one), each run the
-    way the watch list's Check runs a candidate. They have only been recorded since
-    2026-10-01, so until enough days build up each comparison reads Alpha Vantage — up to one
-    call per company the first time each day — and then switches to the recorded series."""
-    holdings = load_holdings()
-    active = active_only(holdings)
-    history = load_holdings_history()
-    sales = load_sales_history()
-    universe = opportunities_b.load_universe()
-    # The old holdings' recorded values, shaped like watch-list price points. Shares don't
-    # change for these, so value moves exactly with price and the returns are the same.
-    recorded = [
-        {"date": p["date"], "ticker": p["ticker"], "price": p["value"]}
-        for p in history
-        if any(h["ticker"] == p["ticker"] for h in holdings if is_old(h))
-    ]
-    seen, results = set(), []
-    for h in sorted((h for h in holdings if is_old(h)), key=lambda h: -h["shares"] * h["current_price"]):
-        company = company_of(h["ticker"], universe)
-        if company in seen:
-            continue
-        seen.add(company)
-        tickers = [x["ticker"] for x in holdings if is_old(x) and company_of(x["ticker"], universe) == company]
-        if results and results[-1].get("source") == "alpha vantage":
-            time.sleep(1.5)  # Alpha Vantage's free key also caps bursts at one call per second
-        try:
-            result = concentration.compare_candidate(h["ticker"], active, history, sales, watchlist_history=recorded)
-        except AlphaVantageError as e:
-            result = {"error": str(e)}
-        results.append({"company": company, "tickers": tickers, **result})
-    return results
-
-
-@app.get("/api/concentration/cushion")
-def get_cushion():
-    """What the old holdings did on the AI bloc's worst days. Free: recorded values plus
-    whatever Alpha Vantage closes are already cached, never a new call."""
-    holdings = load_holdings()
-    old = [h for h in holdings if is_old(h)]
-    if not old:
-        return {"error": "No old holdings."}
-    universe = opportunities_b.load_universe()
-    return concentration.cushion(
-        active_only(holdings), old, load_holdings_history(), load_sales_history(),
-        {h["ticker"]: company_of(h["ticker"], universe) for h in old},
-        {h["ticker"]: alpha_vantage.cached_closes(h["ticker"]) for h in old},
-    )
-
-
 @app.get("/api/concentration")
 def get_concentration():
-    """Which holdings move together. Reads only stored history, so it costs no API calls."""
-    # Active only for now — old holdings join once they have enough recorded days, which
-    # needs its own decision about the denominator. See is_old().
-    return concentration.analyze(active_only(load_holdings()), load_holdings_history(), load_sales_history())
+    """Which holdings move together. Reads only stored history and cached closes, so it costs
+    no API calls. The active holdings set the groups, weights and worst days; the old ones are
+    read against them (concentration._old_holdings) so every % still means active money."""
+    holdings = load_holdings()
+    old = [h for h in holdings if is_old(h)]
+    universe = opportunities_b.load_universe() if old else []
+    return concentration.analyze(
+        active_only(holdings), load_holdings_history(), load_sales_history(),
+        old=old,
+        company_of={h["ticker"]: company_of(h["ticker"], universe) for h in old},
+        cached_closes={h["ticker"]: alpha_vantage.cached_closes(h["ticker"]) for h in old},
+    )
 
 
 @app.post("/api/portfolio-history/seed")

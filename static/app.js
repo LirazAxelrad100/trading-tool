@@ -395,19 +395,34 @@ function renderConcentration(c) {
   }
 
   const dd = c.down_days;
+  const old = c.old;
+  const ddRow = (label, r) =>
+    `<tr><td>${label}</td><td>${coloredPct(r.avg_return_pct)}</td><td class="subtitle">fell on ${r.fell_on} of ${r.of_days}</td></tr>`;
   if (dd) {
+    // Old holdings sit in the same table, on the same days: the question for them ("is my
+    // security a cushion?") is the same question asked of everything else here.
+    const oldRows = old
+      ? [
+          old.down_days
+            ? `<tr class="mini-table-divider"><td colspan="3"><strong>Old holdings</strong> — together ${coloredPct(
+                old.down_days.avg_return_pct
+              )}, fell on ${old.down_days.fell_on} of ${old.down_days.of_days}</td></tr>`
+            : "",
+          ...old.companies.filter((o) => o.down_days).map((o) => ddRow(escapeHtml(companyShort(o.company)), o.down_days)),
+        ].join("")
+      : "";
+    const w = dd.worst_day;
+    const worstLine = w
+      ? `<p>Worst day so far: <strong>${fmtDate(w.date)}</strong>, portfolio ${coloredPct(w.portfolio_pct)}${
+          old && old.worst_day_pct != null ? `, old holdings ${coloredPct(old.worst_day_pct)}` : ""
+        }. When a big fall comes, it will show here.</p>`
+      : "";
     parts.push(`
       <p><strong>On the ${dd.days_used} worst days</strong> (portfolio averaged ${fmtPct(
       dd.portfolio_avg_pct / 100
     )} on those days) — day-to-day independence matters least exactly when things fall together, so this is the harder test:</p>
-      <table class="mini-table"><tbody>${dd.holdings
-        .map(
-          (r) =>
-            `<tr><td>${r.ticker}</td><td>${coloredPct(r.avg_return_pct)}</td><td class="subtitle">fell on ${
-              r.fell_on
-            } of ${r.of_days}</td></tr>`
-        )
-        .join("")}</tbody></table>`);
+      <table class="mini-table"><tbody>${dd.holdings.map((r) => ddRow(r.ticker, r)).join("")}${oldRows}</tbody></table>
+      ${worstLine}`);
   }
 
   if (c.independent.length) {
@@ -434,11 +449,38 @@ function renderConcentration(c) {
       );
     }
   }
-  if (c.excluded.length) {
+  if (old && old.companies.length) {
+    // Same bar as the groups above: an old company "moves with" a holding only if it clears
+    // the line the active holdings had to clear, and "nearly" within the same NEAR_MISS.
+    // Grouped by verdict, so three companies on their own read as one sentence, not three.
+    // "Moves against" is said only of the largest bloc: leaning away from a 4% holding is a
+    // fact, leaning away from the AI bloc is what makes a cushion.
+    const bloc = new Set((c.groups[0] && c.groups[0].tickers) || []);
+    const list = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]);
+    const own = [];
+    const linked = [];
+    for (const o of old.companies) {
+      const top = o.closest;
+      const name = `<strong>${escapeHtml(companyShort(o.company))}</strong>`;
+      if (top && top.correlation >= c.threshold) linked.push(`${name} moves with ${top.ticker} (${fmt(top.correlation)})`);
+      else if (top && top.correlation >= c.threshold - 0.1) linked.push(`${name} nearly moves with ${top.ticker} (${fmt(top.correlation)})`);
+      else own.push(name);
+      const against = o.against.filter((p) => bloc.has(p.ticker));
+      if (against.length)
+        linked.push(`${name} tends to move against ${against.map((p) => `${p.ticker} (${fmt(p.correlation)})`).join(" · ")}`);
+    }
+    const sentences = [];
+    if (own.length) sentences.push(`${list(own)} ${own.length > 1 ? "move on their own" : "moves on its own"}`);
+    sentences.push(...linked);
+    parts.push(`<p><strong>Old holdings:</strong> ${sentences.join(" · ")}.</p>`);
+  }
+  const notYet = [
+    ...c.excluded.map((e) => `${e.ticker} — ${e.reason}`),
+    ...((old && old.excluded) || []).map((e) => `${escapeHtml(companyShort(e.company))} — ${e.reason}`),
+  ];
+  if (notYet.length) {
     parts.push(
-      `<p class="subtitle">Not included yet: ${c.excluded
-        .map((e) => `${e.ticker} — ${e.reason}`)
-        .join(" · ")}. They join on their own once enough days are recorded. Days when you bought or sold are skipped, because the recorded value changes then without the price moving.</p>`
+      `<p class="subtitle">Not included yet: ${notYet.join(" · ")}. They join on their own once enough days are recorded. Days when you bought or sold are skipped, because the recorded value changes then without the price moving.</p>`
     );
   }
   parts.push(
@@ -448,7 +490,11 @@ function renderConcentration(c) {
       c.window_trimmed
         ? ` Only the last ${c.window_days} days count, so older behaviour drops off and this describes now.`
         : ""
-    } That is a short run, so treat single pairs as tentative; a group is more trustworthy when several holdings agree.</p>`
+    } That is a short run, so treat single pairs as tentative; a group is more trustworthy when several holdings agree.${
+      old && old.used_cached_prices
+        ? " Old holdings have been recorded only since 01.10, so earlier days use cached US prices in dollars — a little currency movement is mixed in."
+        : ""
+    }</p>`
   );
   container.innerHTML = parts.join("");
 }
@@ -1623,79 +1669,9 @@ async function saveOldHolding(id) {
   await render();
 }
 
-// Answers "is this really a cushion?" for each old company: does it move with the active
-// holdings, and what did it do on their worst days. One line per company, since GOOGL and
-// GOOG are one. Descriptive only — it says how they have behaved, not what to hold.
-async function checkOldVsActive() {
-  const host = document.getElementById("old-vs-active");
-  host.innerHTML = `<p class="subtitle">Checking… (a few seconds — Alpha Vantage allows one call per second)</p>`;
-  try {
-    const res = await fetch("/api/concentration/old");
-    const rows = await res.json();
-    if (!res.ok) throw new Error(rows.detail || "failed");
-    const lines = rows.map((r) => {
-      const name = `<strong>${escapeHtml(r.company)}</strong> <span class="subtitle">(${r.tickers.join(" + ")})</span>`;
-      if (r.error) return `<li>${name}: <span class="subtitle">couldn't check — ${escapeHtml(r.error)}</span></li>`;
-      const top = r.pairs[0];
-      const verdict = r.joins_group
-        ? `<span class="price-down">moves with your ${r.joins_group.join(" · ")} bloc</span>`
-        : top && top.correlation >= 0.35
-        ? `leans towards ${top.ticker} (${fmt(top.correlation)}) without clearly joining it`
-        : `<span class="price-up">moves largely on its own</span> relative to your active holdings`;
-      const against = r.pairs.filter((p) => p.correlation <= -0.35).map((p) => `${p.ticker} ${fmt(p.correlation)}`);
-      const opposite = against.length ? ` It tends to move <em>against</em> ${against.join(" · ")}.` : "";
-      const d = r.down_days;
-      const down = d
-        ? ` On your active holdings' ${d.days_used} worst days (they averaged ${fmtPct(d.portfolio_avg_pct / 100)}), it averaged ${coloredPct(
-            d.avg_return_pct
-          )} and fell on ${d.fell_on} of ${d.of_days}.`
-        : "";
-      return `<li>${name}: ${verdict}.${opposite}${down}</li>`;
-    });
-    const any = rows.find((r) => r.days);
-    const compared = new Set(((any && any.pairs) || []).map((p) => p.ticker));
-    const missing = activeHoldings().map((h) => h.ticker).filter((t) => !compared.has(t));
-    const src = rows.some((r) => r.source === "alpha vantage")
-      ? "Alpha Vantage price history (the tool's own record takes over once enough days build up)"
-      : "the tool's own recorded prices";
-    host.innerHTML = `<ul class="checklist-context">${lines.join("")}</ul>
-      <p class="subtitle">Based on ${any ? any.days : "—"} shared days, from ${src}, with the market's own move taken out so this measures shared exposure rather than "both are stocks". A short run — read it as a tendency, not a fact.${
-        missing.length ? ` Not compared yet, too few days recorded: ${missing.join(" · ")}.` : ""
-      }</p>`;
-  } catch (e) {
-    host.innerHTML = `<p class="subtitle">Couldn't check: ${escapeHtml(e.message || String(e))}</p>`;
-  }
-}
-
-// Is the "security" actually a cushion? Lines the old holdings up against the AI bloc's worst
-// days, and names the single worst bloc day — when the long-predicted big fall comes, it
-// shows up there by itself. Free (recorded values plus cached closes), so it loads on its own.
-async function loadCushion() {
-  const host = document.getElementById("old-cushion");
-  try {
-    const res = await fetch("/api/concentration/cushion");
-    const c = await res.json();
-    if (!res.ok || c.error) {
-      host.innerHTML = `<p class="subtitle">${escapeHtml(c.error || c.detail || "Couldn't read it.")}</p>`;
-      return;
-    }
-    const name = (s) => s.replace(/,? Inc\.?$/, "").replace(/ Platforms$/, "");
-    const companies = c.companies
-      .map((r) => `${escapeHtml(name(r.company))} ${coloredPct(r.avg_pct)} <span class="subtitle">(fell on ${r.fell_on} of ${r.of_days})</span>`)
-      .join(" · ");
-    const w = c.worst_day;
-    const note = c.used_cached_prices
-      ? ` title="Before 01.10 the old holdings' daily moves come from cached US prices in dollars, so a little currency movement is mixed in. The tool's own records take over as days build up."`
-      : "";
-    host.innerHTML = `
-      <p>On the ${c.days_used} days your AI bloc (${c.bloc.join(" · ")}) fell most, it averaged ${coloredPct(c.bloc_avg_pct)}.
-        Your old holdings averaged ${coloredPct(c.old.avg_pct)} and fell on ${c.old.fell_on} of those ${c.old.of_days} days.</p>
-      <p>${companies}</p>
-      <p>Worst bloc day so far: <strong>${fmtDate(w.date)}</strong>, bloc ${coloredPct(w.bloc_pct)}, old holdings ${coloredPct(w.old_pct)}.</p>
-      <p class="subtitle"${note}>${c.days} trading days, ${fmtDate(c.from_date)}–${fmtDate(c.to_date)}. Updates by itself — when a big fall comes, it will show here as the worst day.</p>`;
-  } catch (e) {
-    host.innerHTML = `<p class="subtitle">Couldn't read it: ${escapeHtml(e.message || String(e))}</p>`;
-  }
+// "Apple Inc." -> "Apple", "Meta Platforms" -> "Meta": how she names them.
+function companyShort(name) {
+  return name.replace(/,? Inc\.?$/, "").replace(/ Platforms$/, "");
 }
 
 function renderOldHoldings(old, activeTotal) {
@@ -1704,7 +1680,6 @@ function renderOldHoldings(old, activeTotal) {
   if (!old.length) {
     panel.style.display = "none";
     everything.style.display = "none";
-    document.getElementById("old-together").style.display = "none";
     return;
   }
   const oldTotal = old.reduce((s, h) => s + h.total, 0);
@@ -1751,8 +1726,6 @@ function renderOldHoldings(old, activeTotal) {
   )} · old holdings ${fmtPct(all ? oldTotal / all : 0)}.`;
   everything.style.display = "block";
   panel.style.display = "block";
-  document.getElementById("old-together").style.display = "block";
-  loadCushion();
 }
 
 async function editHolding(id) {
