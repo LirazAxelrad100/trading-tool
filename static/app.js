@@ -412,14 +412,17 @@ function renderConcentration(c) {
         ].join("")
       : "";
     const w = dd.worst_day;
+    const what = dd.bloc ? "bloc" : "portfolio";
     const worstLine = w
-      ? `<p>Worst day so far: <strong>${fmtDate(w.date)}</strong>, portfolio ${coloredPct(w.portfolio_pct)}${
+      ? `<p>Worst ${what} day so far: <strong>${fmtDate(w.date)}</strong>, ${what} ${coloredPct(w.reference_pct)}${
           old && old.worst_day_pct != null ? `, old holdings ${coloredPct(old.worst_day_pct)}` : ""
         }. When a big fall comes, it will show here.</p>`
       : "";
     parts.push(`
-      <p><strong>On the ${dd.days_used} worst days</strong> (portfolio averaged ${fmtPct(
-      dd.portfolio_avg_pct / 100
+      <p><strong>On the ${dd.days_used} days ${
+        dd.bloc ? `your biggest bloc (${dd.bloc.join(" · ")}) fell most` : "your portfolio fell most"
+      }</strong> (it averaged ${fmtPct(
+      dd.reference_avg_pct / 100
     )} on those days) — day-to-day independence matters least exactly when things fall together, so this is the harder test:</p>
       <table class="mini-table"><tbody>${dd.holdings.map((r) => ddRow(r.ticker, r)).join("")}${oldRows}</tbody></table>
       ${worstLine}`);

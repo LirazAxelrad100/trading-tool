@@ -31,6 +31,7 @@ Descriptive only — it names the blocs and their combined weight, and never sug
 do about them.
 """
 
+import bisect
 import collections
 import datetime
 import math
@@ -216,11 +217,12 @@ def _worst_days(portfolio: list) -> Optional[list]:
     return worst
 
 
-def _down_day_behaviour(returns_by_ticker: dict, portfolio: list) -> Optional[dict]:
-    """On the days the whole portfolio fell hardest, what did each holding do? A holding that
-    still rose on those days genuinely cushioned; one that fell harder than the portfolio
-    amplified the move regardless of how independent it looks on an average day."""
-    worst = _worst_days(portfolio)
+def _down_day_behaviour(returns_by_ticker: dict, reference: list) -> Optional[dict]:
+    """On the days the reference (the largest bloc, else the whole portfolio) fell hardest,
+    what did each holding do? A holding that still rose on those days genuinely cushioned; one
+    that fell harder amplified the move regardless of how independent it looks on an average
+    day."""
+    worst = _worst_days(reference)
     if worst is None:
         return None
 
@@ -242,7 +244,7 @@ def _down_day_behaviour(returns_by_ticker: dict, portfolio: list) -> Optional[di
     rows.sort(key=lambda r: r["avg_return_pct"])
     return {
         "days_used": len(worst),
-        "portfolio_avg_pct": statistics.mean([portfolio[i] for i in worst]) * 100,
+        "reference_avg_pct": statistics.mean([reference[i] for i in worst]) * 100,
         "holdings": rows,
     }
 
@@ -412,7 +414,7 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None,
             old: Optional[list] = None, company_of: Optional[dict] = None,
             cached_closes: Optional[dict] = None) -> dict:
     """Which holdings move together. `holdings` are the active ones and alone set the groups,
-    the weights and the worst days. `old` holdings, when given, are read against those same
+    the weights and the worst days (the largest bloc's). `old` holdings, when given, are read against those same
     days and those same active holdings (see _old_holdings) without joining the groups, so
     every % here still means a share of the active money."""
     sales = sales or []
@@ -496,11 +498,23 @@ def analyze(holdings: list, history: list, sales: Optional[list] = None,
 
     groups.sort(key=lambda g: -g["weight_pct"])
     singles.sort(key=lambda s: -s["weight_pct"])
-    down_days = _down_day_behaviour(usable, portfolio_returns)
-    worst = _worst_days(portfolio_returns)
+    # The worst days are the largest bloc's, not the whole portfolio's (her choice, 2026-10-14):
+    # the fall she is preparing for is that bloc's, and the whole portfolio's worst days are
+    # milder because the holdings outside the bloc soften them. Without a bloc, the portfolio.
+    bloc = groups[0]["tickers"] if groups else None
+    reference = portfolio_returns
+    if bloc:
+        reference = []
+        for i in range(len(dates) - 1):
+            parts = [(weights.get(t, 0), usable[t][i]) for t in bloc if usable[t][i] is not None]
+            carried = sum(w for w, _ in parts)
+            reference.append(sum(w * r for w, r in parts) / carried if carried else None)
+    down_days = _down_day_behaviour(usable, reference)
+    worst = _worst_days(reference)
     if down_days and worst:
         low = worst[0]
-        down_days["worst_day"] = {"date": dates[low + 1], "portfolio_pct": portfolio_returns[low] * 100}
+        down_days["bloc"] = bloc
+        down_days["worst_day"] = {"date": dates[low + 1], "reference_pct": reference[low] * 100}
     return {
         "old": (
             _old_holdings(old, company_of or {}, cached_closes or {}, by_ticker, dates, usable, worst)
@@ -531,7 +545,7 @@ AGAINST = -0.35
 def _old_holdings(old: list, company_of: dict, cached_closes: dict, by_ticker: dict,
                   dates: list, usable: dict, worst: Optional[list]) -> dict:
     """The old holdings, read on the active holdings' terms: does each company move with any
-    active holding, and what did it do on the active portfolio's worst days.
+    active holding, and what did it do on the same worst days as the active ones.
 
     One reading per company (GOOGL and GOOG are one). Old holdings never change shares, so a
     recorded value moves exactly with price. They have been recorded only since 2026-10-01, so
@@ -546,12 +560,25 @@ def _old_holdings(old: list, company_of: dict, cached_closes: dict, by_ticker: d
     for h in old:
         t = h["ticker"]
         rec, closes = by_ticker.get(t, {}), cached_closes.get(t, {})
+        close_dates = sorted(closes)
+
+        def close_on(day: str) -> Optional[float]:
+            """The last close on or before `day`. The recorded dates include weekends, which
+            a market feed has no close for, so Monday's return starts from Sunday's date —
+            and Sunday's price is Friday's close. Not reached further back than a long weekend."""
+            i = bisect.bisect_right(close_dates, day) - 1
+            if i < 0:
+                return None
+            found = close_dates[i]
+            gap = (datetime.date.fromisoformat(day) - datetime.date.fromisoformat(found)).days
+            return closes[found] if gap <= 4 else None
+
         out = []
         for prev, day in zip(dates, dates[1:]):
             if rec.get(prev) and rec.get(day):
                 out.append(math.log(rec[day] / rec[prev]))
-            elif closes.get(prev) and closes.get(day):
-                out.append(math.log(closes[day] / closes[prev]))
+            elif close_on(prev) and close_on(day):
+                out.append(math.log(close_on(day) / close_on(prev)))
                 used_cache = True
             else:
                 out.append(None)
