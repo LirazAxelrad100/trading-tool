@@ -1704,6 +1704,7 @@ function renderOldHoldings(old, activeTotal) {
   if (!old.length) {
     panel.style.display = "none";
     everything.style.display = "none";
+    document.getElementById("old-together").style.display = "none";
     return;
   }
   const oldTotal = old.reduce((s, h) => s + h.total, 0);
@@ -1750,6 +1751,7 @@ function renderOldHoldings(old, activeTotal) {
   )} · old holdings ${fmtPct(all ? oldTotal / all : 0)}.`;
   everything.style.display = "block";
   panel.style.display = "block";
+  document.getElementById("old-together").style.display = "block";
   loadCushion();
 }
 
