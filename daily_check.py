@@ -1,7 +1,8 @@
 import copy
 import json
+import socket
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import main
@@ -196,7 +197,9 @@ def checkpoint_emails() -> None:
         CHECKPOINTS_FILE.write_text(json.dumps(checkpoints, indent=2, ensure_ascii=False))
 
 
-def run() -> None:
+def run() -> bool:
+    """The whole check. Returns False only when the email could not be sent, so the caller
+    tries the day again."""
     holdings = main.load_holdings()
     before = copy.deepcopy(holdings)
     weekend = prices.is_weekend()
@@ -281,7 +284,7 @@ def run() -> None:
 
     if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")
-        return
+        return True
 
     lines = [f"Daily trailing-stop check — {date.today()}", ""]
     if stop_hits:
@@ -314,7 +317,45 @@ def run() -> None:
         # Marked only once the email went out, so a failed send reminds again tomorrow.
         done = set(json.loads(REMINDED_FILE.read_text())) if REMINDED_FILE.exists() else set()
         REMINDED_FILE.write_text(json.dumps(sorted(done | {r["key"] for r in dividends_due}), indent=2))
+    return sent
+
+
+STATE_FILE = Path(__file__).parent / "data" / "daily_check_state.json"
+RUN_FROM_HOUR = 8
+
+
+def online() -> bool:
+    """Can the email actually go out? Checked against the mail server itself, since the
+    email is the part that has to arrive."""
+    try:
+        socket.create_connection(("smtp.gmail.com", 587), timeout=10).close()
+        return True
+    except OSError:
+        return False
+
+
+def run_once_a_day() -> None:
+    """launchd starts this every 30 minutes; the check itself runs once a day, from 08:00,
+    the first time the Mac is online (2026-10-28).
+
+    It used to be a single 08:00 start. With the laptop closed, macOS runs a missed start
+    once, at the next wake — and that is usually a "dark wake", a few seconds with the lid
+    shut and no Wi-Fi. So the day's only try failed on no internet, and when she really
+    opened the Mac later nothing ran again: no email from 23.10 to 27.10, including two stop
+    losses and a decision question. Now a day counts as done only once the email went out,
+    and a start without internet stops quietly and leaves the day open."""
+    today = date.today().isoformat()
+    if datetime.now().hour < RUN_FROM_HOUR:
+        return
+    state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    if state.get("last_done") == today:
+        return
+    if not online():
+        print(f"{datetime.now():%Y-%m-%d %H:%M}: no internet, trying again in 30 minutes.")
+        return
+    if run():
+        STATE_FILE.write_text(json.dumps({"last_done": today}, indent=2))
 
 
 if __name__ == "__main__":
-    run()
+    run_once_a_day()
