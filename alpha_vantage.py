@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -19,6 +20,15 @@ class AlphaVantageError(Exception):
     pass
 
 
+def _write_json(path: Path, data) -> None:
+    """Write to a temp file and swap it in. Two charts opened at once run in parallel
+    threads; a plain write_text from both left the longer write's tail after the shorter
+    one, and the cache stopped parsing (2026-11-01)."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, path)
+
+
 def _load_news_sentiment_cache() -> dict:
     if not NEWS_SENTIMENT_CACHE_FILE.exists():
         return {}
@@ -26,7 +36,7 @@ def _load_news_sentiment_cache() -> dict:
 
 
 def _save_news_sentiment_cache(cache: dict) -> None:
-    NEWS_SENTIMENT_CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    _write_json(NEWS_SENTIMENT_CACHE_FILE, cache)
 
 
 def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
@@ -153,7 +163,7 @@ def fetch_dividends(ticker: str, cached_only: bool = False) -> list:
     dividends = [d for d in dividends if d["payment_date"][:1].isdigit()]
     dividends.sort(key=lambda d: d["payment_date"], reverse=True)
     cache[ticker] = {"fetched_date": date.today().isoformat(), "dividends": dividends[:12]}
-    DIVIDENDS_CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    _write_json(DIVIDENDS_CACHE_FILE, cache)
     return cache[ticker]["dividends"]
 
 
@@ -164,7 +174,7 @@ def _load_price_history_cache() -> dict:
 
 
 def _save_price_history_cache(cache: dict) -> None:
-    PRICE_HISTORY_CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    _write_json(PRICE_HISTORY_CACHE_FILE, cache)
 
 
 def prices_cached_today(ticker: str) -> bool:
