@@ -15,8 +15,10 @@ from pydantic import BaseModel
 
 import alpha_vantage
 import breadth
+import base64
 import cash
 import cash_flow
+import screens
 import concentration
 import consensus_store
 import dividends
@@ -336,6 +338,9 @@ class SellRequest(BaseModel):
     sell_date: str
     sell_time: Optional[str] = None
     override_price_check: bool = False
+    # From the sale's own Tax screen, to check this record against the bank's.
+    broker_gain: Optional[float] = None
+    tax_paid: Optional[float] = None
 
 
 TRIGGER_THRESHOLD = 0.10
@@ -648,6 +653,10 @@ def sell_holding(holding_id: str, sell: SellRequest):
         # Each bank nets its own losses at source, so the tax summary needs to know where.
         "broker": holding.get("broker") or tax.DEFAULT_BROKER,
     }
+    if sell.broker_gain is not None:
+        entry["broker_gain"] = sell.broker_gain
+    if sell.tax_paid is not None:
+        entry["tax_paid"] = sell.tax_paid
 
     entries = load_sales_history()
     entries.append(entry)
@@ -1647,7 +1656,12 @@ def put_tax_settings(broker: str, body: BankTaxIn):
         raise HTTPException(status_code=422, detail="Allowance must be 0–1.000 and the loss pot a positive amount.")
     settings = load_tax_settings()
     # The date dates the allowance too: dividends paid after it are taken off (dividends.py).
-    entry = {"allowance_left": body.allowance_left or 0.0, "as_of": body.as_of or date.today().isoformat()}
+    # A figure read today counts from this moment, not from midnight. Otherwise today's earlier
+    # sales look newer than the figure and get added on top of it (tax.bank_summary()).
+    as_of = body.as_of or now_stamp()
+    if as_of == date.today().isoformat():
+        as_of = now_stamp()
+    entry = {"allowance_left": body.allowance_left or 0.0, "as_of": as_of}
     if body.share_loss_pot is not None:
         entry["share_loss_pot"] = body.share_loss_pot
     if body.other_loss_pot:
@@ -1655,6 +1669,37 @@ def put_tax_settings(broker: str, body: BankTaxIn):
     settings[broker] = entry
     TAX_SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
     return settings
+
+
+MAX_SCREEN_BYTES = 5 * 1024 * 1024
+
+
+@app.post("/api/screens/read")
+def read_screens(
+    sale: Optional[UploadFile] = File(None),
+    sale_tax: Optional[UploadFile] = File(None),
+    buy: Optional[UploadFile] = File(None),
+    cash: Optional[UploadFile] = File(None),
+    tax_overview: Optional[UploadFile] = File(None),
+):
+    """Reads the dropped screens into numbers for the form. Saves nothing and keeps no image."""
+    files = {"sale": sale, "sale_tax": sale_tax, "buy": buy, "cash": cash, "tax_overview": tax_overview}
+    images = {}
+    for slot, upload in files.items():
+        if upload is None:
+            continue
+        if upload.content_type != "image/jpeg":
+            raise HTTPException(status_code=422, detail="Screens must reach the server as JPEG images.")
+        data = upload.file.read()
+        if len(data) > MAX_SCREEN_BYTES:
+            raise HTTPException(status_code=422, detail="That image is too large.")
+        images[slot] = ("image/jpeg", base64.standard_b64encode(data).decode("ascii"))
+    if not images:
+        raise HTTPException(status_code=422, detail="Add at least one screen.")
+    try:
+        return screens.read(images, date.today().isoformat())
+    except screens.ReadFailed as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 class CashIn(BaseModel):

@@ -1879,6 +1879,14 @@ async function addHolding() {
     return;
   }
 
+  const cashNow = optionalNumber("f-cash");
+  if (cashNow !== null && isNaN(cashNow)) {
+    alert("The cash amount isn't a number. For example: 1.234,56");
+    return;
+  }
+  const buyWarnings = buyChecks(buyInputs("add")).filter((c) => !c.ok).map((c) => c.text);
+  if (buyWarnings.length && !confirm(`${buyWarnings.join("\n\n")}\n\nAdd the purchase anyway?`)) return;
+
   const payload = { ticker, shares, cost_basis, purchase_date, stop_price, exit_plan, broker };
   if (refRaw) payload.reference_high = parseEuNumber(refRaw);
   if (isin) payload.isin = isin;
@@ -1921,6 +1929,9 @@ async function addHolding() {
   stopTyped = false;
   stopDefaultToken++;
   document.getElementById("stop-hint").textContent = "";
+  if (res.ok && cashNow !== null) await saveCashLine(cashNow);
+  document.getElementById("add-screens-box").open = false;
+  startBuyForm("add");
   await render();
 }
 
@@ -3154,6 +3165,18 @@ async function sellHolding(id) {
   document.getElementById("sell-date").value = now.toISOString().slice(0, 10);
   document.getElementById("sell-time").value = now.toTimeString().slice(0, 5);
   document.getElementById("sell-preview").textContent = "";
+  ["sell-gain", "sell-tax-paid", "sell-cash", "sell-allow", "sell-pot", "sell-other"].forEach(
+    (f) => (document.getElementById(f).value = "")
+  );
+  document.getElementById("sell-checks").innerHTML = "";
+  document.getElementById("sell-done").innerHTML = "";
+  document.getElementById("sell-form").style.display = "";
+  // Trade Republic's screens and cash only; another bank's figures are typed.
+  const onTR = isMainBroker(h);
+  document.getElementById("sell-cash-box").style.display = onTR ? "" : "none";
+  document.getElementById("sell-screens").style.display = onTR ? "" : "none";
+  if (onTR) mountScreens("sell-screens", "sale", fillSellFromScreens);
+  sellBefore = await figuresBefore(h);
   const ref = document.getElementById("sell-ref-price");
   ref.textContent = h.manual_price
     ? `Current price: ${fmt(h.current_price)} (manual)`
@@ -3174,6 +3197,315 @@ async function sellHolding(id) {
 function closeSellModal() {
   document.getElementById("sell-modal").style.display = "none";
   sellingId = null;
+}
+
+// ---- Trade Republic's screens: drop them in, Claude reads the numbers, nothing saves until
+// Confirm. See screens.py. ----
+const MAIN_BROKER = "Trade Republic";
+const SCREEN_SLOTS = {
+  sale: [
+    { key: "sale", label: "The sale" },
+    { key: "sale_tax", label: "Its Tax screen (tap Tax on the sale)" },
+    { key: "cash", label: "Cash" },
+    { key: "tax_overview", label: "Tax overview (Profile, then Tax)", cut: true },
+  ],
+  buy: [
+    { key: "buy", label: "The purchase" },
+    { key: "cash", label: "Cash" },
+  ],
+};
+// The Tax overview has the tax ID in this top part, with the figures below it. The browser
+// removes it, so it never reaches the server, and the preview shows what will be sent.
+const SCREEN_CUT_TOP = 0.33;
+const SCREEN_MAX_EDGE = 1568;
+const screenState = {};
+let sellBefore = { cash: null, tax: null };
+
+function isMainBroker(h) {
+  return !h || !h.broker || h.broker === MAIN_BROKER;
+}
+
+async function figuresBefore(h) {
+  try {
+    const [cash, tax] = await Promise.all([
+      fetch("/api/cash").then((r) => r.json()),
+      fetch("/api/tax-settings").then((r) => r.json()),
+    ]);
+    return { cash: cash.entered ? cash.amount : null, tax: (tax && h && tax[h.broker || MAIN_BROKER]) || null };
+  } catch (e) {
+    return { cash: null, tax: null };
+  }
+}
+
+function mountScreens(panelId, kind, onRead) {
+  screenState[panelId] = { kind, blobs: {}, read: null, onRead };
+  const slots = SCREEN_SLOTS[kind]
+    .map(
+      (s) => `<div class="screen-slot">
+        <label>${escapeHtml(s.label)}</label>
+        <input type="file" accept="image/*" onchange="pickScreen('${panelId}', '${s.key}', this)" />
+        <div id="${panelId}-${s.key}-note"></div>
+      </div>`
+    )
+    .join("");
+  document.getElementById(panelId).innerHTML = `<div class="screen-panel">
+    <p class="subtitle">Add these screens from Trade Republic, then press Read. Nothing is saved until you confirm. The screens go to Anthropic to be read, and aren't kept.</p>
+    <div class="screen-slots">${slots}</div>
+    <button class="secondary" onclick="readScreens('${panelId}')">Read the screens</button>
+    <div id="${panelId}-status"></div>
+  </div>`;
+}
+
+async function pickScreen(panelId, key, input) {
+  const state = screenState[panelId];
+  const slot = SCREEN_SLOTS[state.kind].find((s) => s.key === key);
+  const note = document.getElementById(`${panelId}-${key}-note`);
+  delete state.blobs[key];
+  note.innerHTML = "";
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const blob = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
+    state.blobs[key] = blob;
+    note.innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="" />${
+      slot.cut ? `<div class="subtitle">Top cut off. Check your tax ID isn't showing.</div>` : ""
+    }`;
+  } catch (e) {
+    note.innerHTML = `<div class="sell-warn">This image can't be opened here. Try a PNG or JPEG.</div>`;
+  }
+}
+
+async function prepareScreen(file, cutTop) {
+  const bitmap = await createImageBitmap(file);
+  const top = Math.round(bitmap.height * cutTop);
+  const height = bitmap.height - top;
+  const scale = Math.min(1, SCREEN_MAX_EDGE / Math.max(bitmap.width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, top, bitmap.width, height, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no image"))), "image/jpeg", 0.92)
+  );
+}
+
+async function readScreens(panelId) {
+  const state = screenState[panelId];
+  const status = document.getElementById(`${panelId}-status`);
+  const keys = Object.keys(state.blobs);
+  if (!keys.length) {
+    status.innerHTML = `<div class="sell-warn">Add at least one screen first.</div>`;
+    return;
+  }
+  const form = new FormData();
+  keys.forEach((k) => form.append(k, state.blobs[k], `${k}.jpg`));
+  status.innerHTML = `<div class="subtitle">Reading…</div>`;
+  try {
+    const res = await fetch("/api/screens/read", { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      status.innerHTML = `<div class="sell-warn">${escapeHtml(
+        typeof body.detail === "string" ? body.detail : "The screens couldn't be read. You can type the numbers."
+      )}</div>`;
+      return;
+    }
+    state.read = body;
+    const missing = SCREEN_SLOTS[state.kind].filter((s) => !state.blobs[s.key]).map((s) => s.label);
+    status.innerHTML =
+      `<div class="subtitle">Read. Check the numbers below before you confirm.</div>` +
+      (body.problems || []).map((p) => `<div class="sell-warn">⚠ ${escapeHtml(p)}</div>`).join("") +
+      (missing.length ? `<div class="subtitle">Not added: ${escapeHtml(missing.join(", "))}.</div>` : "");
+    state.onRead(body);
+  } catch (e) {
+    status.innerHTML = `<div class="sell-warn">The screens couldn't be read. You can type the numbers.</div>`;
+  }
+}
+
+function sameCompany(asset, h) {
+  if (!asset || !h) return true;
+  const a = asset.trim().toLowerCase();
+  if (a === h.ticker.toLowerCase()) return true;
+  // A ticker outside the S&P 500 file has no company name to compare with.
+  if (!h.company || h.company === h.ticker) return true;
+  return a.split(/\s+/)[0] === h.company.toLowerCase().split(/\s+/)[0];
+}
+
+const near = (a, b, within) => Math.abs(a - b) <= within;
+const has = (n) => n !== null && n !== undefined && !isNaN(n);
+const SALE_GAIN_TOLERANCE = 5; // purchase fees: the bank counts them as cost, older lots here don't
+const SCREEN_CENTS_TOLERANCE = 1;
+
+// Every number on the form checked against the others, so a typing slip or a misread digit
+// shows up before it is saved. Real case: NBIS was recorded after tax, and nothing noticed for
+// two weeks. Warnings only; there are real reasons for a difference, and she decides.
+function saleChecks(i) {
+  const out = [];
+  const read = i.read || {};
+  const assets = [read.sale && read.sale.asset].filter(Boolean);
+  if (i.h && assets.length && !sameCompany(assets[0], i.h)) {
+    out.push({ ok: false, text: `This screen is for ${assets[0]}, but you're selling ${i.h.ticker}.` });
+  }
+  if (i.h && has(i.shares) && i.shares > i.h.shares + 1e-6) {
+    out.push({ ok: false, text: `${fmtShares(i.shares)} shares is more than the ${fmtShares(i.h.shares)} you hold.` });
+  }
+
+  const toolGain = has(i.total) && has(i.toolCost) ? i.total - i.toolCost : null;
+  if (has(i.gain) && has(toolGain)) {
+    // A loss typed without its minus is still the same loss.
+    const bankGain = i.gain > 0 && toolGain < 0 ? -i.gain : i.gain;
+    if (near(bankGain, toolGain, SALE_GAIN_TOLERANCE)) {
+      out.push({ ok: true, text: `Profit matches: your bank ${fmt(bankGain)}, the tool ${fmt(toolGain)}.` });
+    } else if (has(i.taxPaid) && i.taxPaid > 0 && near(bankGain - toolGain, i.taxPaid, SALE_GAIN_TOLERANCE)) {
+      out.push({
+        ok: false,
+        text: `The total looks like the amount after tax. With the tax added it would be ${fmt(i.total + i.taxPaid)}. Use the Total on the sale's own screen.`,
+      });
+    } else {
+      out.push({ ok: false, text: `Your bank's profit is ${fmt(bankGain)}, the tool's is ${fmt(toolGain)}. Check the shares and the total.` });
+    }
+  }
+
+  const taxScreen = read.sale_tax;
+  if (taxScreen && has(taxScreen.gross_gain) && has(taxScreen.tax_base) && taxScreen.gross_gain > 0) {
+    const used = (taxScreen.pot_stocks_used || 0) + (taxScreen.pot_other_used || 0) + (taxScreen.exemption_used || 0);
+    if (!near(taxScreen.gross_gain - used, taxScreen.tax_base, SCREEN_CENTS_TOLERANCE)) {
+      out.push({ ok: false, text: `The Tax screen doesn't add up as read: ${fmt(taxScreen.gross_gain)} minus ${fmt(used)} isn't ${fmt(taxScreen.tax_base)}. A digit may be misread.` });
+    }
+  }
+
+  // What reached the cash account, when the Cash screen's top row is this sale.
+  const top = read.cash;
+  if (top && has(top.top_amount) && has(i.total) && has(i.taxPaid) && assets.length && top.top_name
+      && top.top_name.trim().toLowerCase().split(/\s+/)[0] === assets[0].trim().toLowerCase().split(/\s+/)[0]) {
+    const received = i.total - i.taxPaid;
+    out.push(
+      near(received, top.top_amount, SCREEN_CENTS_TOLERANCE)
+        ? { ok: true, text: `Tax matches: total minus tax is the ${fmt(top.top_amount)} that reached your cash.` }
+        : { ok: false, text: `Total minus tax is ${fmt(received)}, but ${fmt(top.top_amount)} reached your cash. Check the total and the tax.` }
+    );
+  }
+
+  if (has(i.cashNow) && has(i.total) && has(i.before && i.before.cash)) {
+    const expected = i.before.cash + i.total - (i.taxPaid || 0);
+    out.push(
+      near(expected, i.cashNow, SCREEN_CENTS_TOLERANCE)
+        ? { ok: true, text: `Cash matches: ${fmt(i.before.cash)} plus the money received is ${fmt(i.cashNow)}.` }
+        : { ok: false, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A dividend, interest, a tax correction or an unrecorded trade could explain it.` }
+    );
+  }
+
+  // A profit can only use up what was there. Only for profits: a loss also pays back earlier tax.
+  const old = i.before && i.before.tax;
+  const usedRead = taxScreen && has(taxScreen.gross_gain) && taxScreen.gross_gain > 0
+    ? (taxScreen.pot_stocks_used || 0) + (taxScreen.pot_other_used || 0) + (taxScreen.exemption_used || 0)
+    : null;
+  if (old && has(usedRead) && has(i.allowance) && has(i.pot) && has(i.other)) {
+    const was = (old.allowance_left || 0) + (old.share_loss_pot || 0) + (old.other_loss_pot || 0);
+    const now = i.allowance + i.pot + i.other;
+    if (!near(was - usedRead, now, SCREEN_CENTS_TOLERANCE)) {
+      out.push({ ok: false, text: `Losses and allowance: the tool expected ${fmt(was - usedRead)} left, and the screen shows ${fmt(now)}. After a tax correction this screen can be behind, so check it again later.` });
+    }
+  }
+  return out;
+}
+
+function buyChecks(i) {
+  const out = [];
+  const read = i.read || {};
+  if (i.h && read.buy && read.buy.asset && !sameCompany(read.buy.asset, i.h)) {
+    out.push({ ok: false, text: `This screen is for ${read.buy.asset}, but you're adding to ${i.h.ticker}.` });
+  }
+  if (read.buy && has(read.buy.fee) && read.buy.fee > 0 && has(read.buy.total)) {
+    out.push({ ok: true, text: `Buy in includes the ${fmt(read.buy.fee)} fee, because your bank counts it as cost.` });
+  }
+  if (has(i.cashNow) && has(i.spent) && has(i.before && i.before.cash)) {
+    const expected = i.before.cash - i.spent;
+    out.push(
+      near(expected, i.cashNow, SCREEN_CENTS_TOLERANCE)
+        ? { ok: true, text: `Cash matches: ${fmt(i.before.cash)} minus ${fmt(i.spent)} is ${fmt(i.cashNow)}.` }
+        : { ok: false, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A deposit, a dividend, interest or an unrecorded trade could explain it.` }
+    );
+  }
+  return out;
+}
+
+// The two places a purchase is entered: the lots window and the Add holding form.
+const BUY_FORMS = {
+  lot: { panel: "lot-screens", checks: "lot-checks", shares: "lot-shares", cost: "lot-cost", date: "lot-date", cash: "lot-cash" },
+  add: { panel: "add-screens", checks: "add-checks", shares: "f-shares", cost: "f-cost", date: "f-date", cash: "f-cash" },
+};
+const buyBefore = { lot: { cash: null, tax: null }, add: { cash: null, tax: null } };
+
+function buyInputs(form) {
+  const f = BUY_FORMS[form];
+  const shares = parseEuNumber(document.getElementById(f.shares).value);
+  const cost = parseEuNumber(document.getElementById(f.cost).value);
+  return {
+    h: form === "lot" ? lastHoldings.find((x) => x.id === lotsHoldingId) : null,
+    spent: !isNaN(shares) && !isNaN(cost) ? shares * cost : null,
+    cashNow: optionalNumber(f.cash),
+    read: screenState[f.panel] ? screenState[f.panel].read : null,
+    before: buyBefore[form],
+  };
+}
+
+function renderBuyChecks(form) {
+  renderChecks(BUY_FORMS[form].checks, buyChecks(buyInputs(form)));
+}
+
+async function startBuyForm(form) {
+  const f = BUY_FORMS[form];
+  mountScreens(f.panel, "buy", (r) => {
+    const buy = r.buy || {};
+    if (has(buy.shares)) document.getElementById(f.shares).value = toEuInput(buy.shares);
+    // Total over shares, so the fee is in the cost exactly as the bank taxes it.
+    if (has(buy.total) && has(buy.shares) && buy.shares > 0) {
+      const cost = Math.round((buy.total / buy.shares) * 1e6) / 1e6;
+      document.getElementById(f.cost).value = toEuInput(cost);
+    }
+    if (buy.date) document.getElementById(f.date).value = buy.date;
+    if (r.cash && has(r.cash.available)) document.getElementById(f.cash).value = toEuInput(r.cash.available);
+    if (form === "add") applyStopDefault();
+    renderBuyChecks(form);
+  });
+  document.getElementById(f.cash).value = "";
+  document.getElementById(f.checks).innerHTML = "";
+  buyBefore[form] = await figuresBefore(form === "lot" ? lastHoldings.find((x) => x.id === lotsHoldingId) : { broker: MAIN_BROKER });
+}
+
+async function saveCashLine(amount) {
+  if (amount === null) {
+    return `<span class="sell-warn">Cash not updated, so the tool shows an estimate until you enter it.</span>`;
+  }
+  try {
+    const res = await fetch("/api/cash", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount }),
+    });
+    if (!res.ok) throw new Error();
+    await renderCash();
+    return `Uninvested money saved: ${fmt(amount)}.`;
+  } catch (e) {
+    return `<span class="sell-warn">The cash figure couldn't be saved. Click the number next to the holdings total to enter it.</span>`;
+  }
+}
+
+async function saveTaxLine(broker, i) {
+  if (!i) return `<span class="sell-warn">Allowance and loss pots not updated, so tax estimates may be off. You can enter them in the History tab.</span>`;
+  try {
+    const res = await fetch(`/api/tax-settings/${encodeURIComponent(broker)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      // No date: the server stamps this moment, so the sale just saved isn't counted again.
+      body: JSON.stringify({ allowance_left: i.allowance, share_loss_pot: i.pot, other_loss_pot: i.other }),
+    });
+    if (!res.ok) throw new Error();
+    return `Allowance left ${fmt(i.allowance)}, losses ${fmt(i.pot + i.other)} saved.`;
+  } catch (e) {
+    return `<span class="sell-warn">Allowance and loss pots couldn't be saved. You can enter them in the History tab.</span>`;
+  }
 }
 
 let lotsHoldingId = null;
@@ -3596,7 +3928,9 @@ function openLotsModal(id) {
   document.getElementById("lot-shares").value = "";
   document.getElementById("lot-cost").value = "";
   document.getElementById("lot-date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("lot-done").innerHTML = "";
   document.getElementById("lots-modal").style.display = "flex";
+  startBuyForm("lot");
 }
 
 function renderLotsModalBody(h) {
@@ -3694,6 +4028,13 @@ async function submitAddLot() {
     alert("Fill in shares bought, buy-in, and date.");
     return;
   }
+  const cashNow = optionalNumber("lot-cash");
+  if (cashNow !== null && isNaN(cashNow)) {
+    alert("The cash amount isn't a number. For example: 1.234,56");
+    return;
+  }
+  const buyWarnings = buyChecks(buyInputs("lot")).filter((c) => !c.ok).map((c) => c.text);
+  if (buyWarnings.length && !confirm(`${buyWarnings.join("\n\n")}\n\nAdd the purchase anyway?`)) return;
   const res = await fetch(`${API}/${lotsHoldingId}/lots`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3705,7 +4046,11 @@ async function submitAddLot() {
   }
   document.getElementById("lot-shares").value = "";
   document.getElementById("lot-cost").value = "";
+  const spent = shares * cost_basis;
+  const cashLine = isMainBroker(lastHoldings.find((x) => x.id === lotsHoldingId)) ? await saveCashLine(cashNow) : "";
   await refreshLotsModal();
+  document.getElementById("lot-done").innerHTML = `Purchase added: ${fmt(spent)}.${cashLine ? "<br>" + cashLine : ""}`;
+  startBuyForm("lot");
 }
 
 function closeLotsModal() {
@@ -3730,6 +4075,7 @@ function fifoCost(lots, sharesToSell) {
 }
 
 function updateSellPreview() {
+  renderSellChecks();
   const preview = document.getElementById("sell-preview");
   const shares = parseEuNumber(document.getElementById("sell-shares").value);
   const total = parseEuNumber(document.getElementById("sell-total").value);
@@ -3759,7 +4105,8 @@ function updateSellPreview() {
   preview.innerHTML = `<div>${line}</div>${warn}<div id="sell-tax"></div>`;
 
   // Tax for exactly what was typed, after a short pause so each keystroke isn't a request.
-  if (!h) return;
+  // Once the real tax is in the form, an estimate beside it only adds a second number.
+  if (!h || document.getElementById("sell-tax-paid").value.trim()) return;
   const token = ++sellTaxToken;
   clearTimeout(sellTaxTimer);
   sellTaxTimer = setTimeout(async () => {
@@ -3776,6 +4123,61 @@ function updateSellPreview() {
 let sellTaxTimer = null;
 let sellTaxToken = 0;
 
+function optionalNumber(id) {
+  const raw = document.getElementById(id).value.trim();
+  return raw ? parseEuNumber(raw) : null;
+}
+
+// What the form holds now, read fresh each time because every field can be corrected by hand.
+function sellInputs() {
+  const h = lastHoldings.find((x) => x.id === sellingId);
+  const shares = parseEuNumber(document.getElementById("sell-shares").value);
+  return {
+    h,
+    shares,
+    total: parseEuNumber(document.getElementById("sell-total").value),
+    toolCost: h && !isNaN(shares) ? fifoCost(h.lots, shares) : null,
+    gain: optionalNumber("sell-gain"),
+    taxPaid: optionalNumber("sell-tax-paid"),
+    cashNow: optionalNumber("sell-cash"),
+    allowance: optionalNumber("sell-allow"),
+    pot: optionalNumber("sell-pot"),
+    other: optionalNumber("sell-other"),
+    read: screenState["sell-screens"] ? screenState["sell-screens"].read : null,
+    before: sellBefore,
+  };
+}
+
+function renderSellChecks() {
+  renderChecks("sell-checks", saleChecks(sellInputs()));
+}
+
+function renderChecks(id, checks) {
+  document.getElementById(id).innerHTML = checks
+    .map((c) => `<div class="${c.ok ? "screen-ok" : "sell-warn"}">${c.ok ? "✓" : "⚠"} ${escapeHtml(c.text)}</div>`)
+    .join("");
+}
+
+function fillSellFromScreens(r) {
+  const set = (id, v) => {
+    if (v != null) document.getElementById(id).value = toEuInput(v);
+  };
+  const sale = r.sale || {};
+  const taxScreen = r.sale_tax || {};
+  const overview = r.tax_overview || {};
+  set("sell-shares", sale.shares);
+  set("sell-total", sale.total);
+  if (sale.date) document.getElementById("sell-date").value = sale.date;
+  if (sale.time) document.getElementById("sell-time").value = sale.time;
+  set("sell-gain", taxScreen.gross_gain);
+  set("sell-tax-paid", taxScreen.tax_paid);
+  set("sell-cash", r.cash && r.cash.available);
+  set("sell-allow", overview.allowance_left);
+  set("sell-pot", overview.pot_stocks);
+  set("sell-other", overview.pot_other);
+  updateSellPreview();
+}
+
 async function submitSell(overridePriceCheck = false) {
   const shares_sold = parseEuNumber(document.getElementById("sell-shares").value);
   const total_sum = parseEuNumber(document.getElementById("sell-total").value);
@@ -3786,11 +4188,37 @@ async function submitSell(overridePriceCheck = false) {
     alert("Enter shares sold, the sale total before tax, and a sell date.");
     return;
   }
+  const i = sellInputs();
+  const typed = [i.gain, i.taxPaid, i.cashNow, i.allowance, i.pot, i.other];
+  if (typed.some((n) => n !== null && isNaN(n))) {
+    alert("One of the amounts isn't a number. For example: 1.234,56");
+    return;
+  }
+  const taxFigures = [i.allowance, i.pot, i.other];
+  const someTax = taxFigures.some((n) => n !== null);
+  if (someTax && taxFigures.some((n) => n === null)) {
+    alert("Enter all three: allowance left, loss pot stocks and loss pot other. Use 0 for an empty one.");
+    return;
+  }
+
+  if (!overridePriceCheck) {
+    const warnings = saleChecks(i).filter((c) => !c.ok).map((c) => c.text);
+    if (i.gain === null) warnings.push("The gross gain or loss is empty, so the tool can't check this sale against your bank.");
+    if (warnings.length && !confirm(`${warnings.join("\n\n")}\n\nRecord the sale anyway?`)) return;
+  }
 
   const res = await fetch(`${API}/${sellingId}/sell`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ shares_sold, total_sum, sell_date, sell_time: sell_time || null, override_price_check: overridePriceCheck }),
+    body: JSON.stringify({
+      shares_sold,
+      total_sum,
+      sell_date,
+      sell_time: sell_time || null,
+      override_price_check: overridePriceCheck,
+      broker_gain: i.gain,
+      tax_paid: i.taxPaid,
+    }),
   });
 
   if (!res.ok) {
@@ -3809,7 +4237,13 @@ async function submitSell(overridePriceCheck = false) {
     return;
   }
 
-  closeSellModal();
+  // The sale is saved, so the rest reports what happened rather than stopping.
+  const entry = await res.json();
+  const lines = [`${entry.ticker} sale recorded: ${fmt(total_sum)} before tax.`];
+  if (isMainBroker(i.h)) lines.push(await saveCashLine(i.cashNow));
+  lines.push(await saveTaxLine(entry.broker, someTax ? i : null));
+  document.getElementById("sell-form").style.display = "none";
+  document.getElementById("sell-done").innerHTML = lines.join("<br>");
   await render();
 }
 
@@ -3938,7 +4372,7 @@ function renderSalesSummary(s, settings) {
         <div><label>Other loss pot (if the bank shows one)</label><input id="tx-other-${id}" type="text" inputmode="decimal" value="${
           e.other_loss_pot != null ? toEuInput(e.other_loss_pot) : ""
         }" placeholder="0" /></div>
-        <div><label>Date you read these</label><input id="tx-asof-${id}" type="date" value="${e.as_of || ""}" /></div>
+        <div><label>Date you read these</label><input id="tx-asof-${id}" type="date" value="${(e.as_of || "").slice(0, 10)}" /></div>
         <button class="secondary" onclick="saveBankTax('${escapeHtml(b.broker)}', '${id}')">Save</button>
       </div>`;
     })
@@ -4023,4 +4457,5 @@ async function removeSalesEntry(id) {
 
 initInfoTooltips();
 restoreSubView();
+startBuyForm("add");
 loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration()).then(() => loadBreadth());

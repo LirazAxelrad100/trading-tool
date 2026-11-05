@@ -43,6 +43,11 @@
         <button onclick="addHolding()">Add</button>
       </div>
       <p id="stop-hint" class="subtitle"></p>
+      <details class="bank-tax-settings" id="add-screens-box"><summary>Fill in from Trade Republic's screens</summary>
+        <div id="add-screens"></div>
+        <div class="add-form"><div id="add-cash-box"><label>Cash now (Available)</label><input id="f-cash" type="text" inputmode="decimal" oninput="renderBuyChecks('add')" /></div></div>
+        <div id="add-checks"></div>
+      </details>
     </div>
 
     <div class="panel">
@@ -372,30 +377,51 @@
       </div>
       <div id="lots-modal-body"></div>
       <h3 style="margin:1rem 0 0.4rem; font-size:0.95rem;">Add a purchase (lot)</h3>
+      <div id="lot-screens"></div>
       <div class="add-form">
-        <div><label>Shares bought</label><input id="lot-shares" type="text" inputmode="decimal" /></div>
-        <div><label>Buy in / share (EUR)</label><input id="lot-cost" type="text" inputmode="decimal" /></div>
+        <div><label>Shares bought</label><input id="lot-shares" type="text" inputmode="decimal" oninput="renderBuyChecks('lot')" /></div>
+        <div><label>Buy in / share (EUR)</label><input id="lot-cost" type="text" inputmode="decimal" oninput="renderBuyChecks('lot')" /></div>
         <div><label>Purchase date</label><input id="lot-date" type="date" /></div>
+        <div><label>Cash now (Available)</label><input id="lot-cash" type="text" inputmode="decimal" oninput="renderBuyChecks('lot')" /></div>
         <button onclick="submitAddLot()">Add purchase</button>
       </div>
+      <div id="lot-checks"></div>
+      <div id="lot-done" class="screen-done"></div>
     </div>
   </div>
 
   <div id="sell-modal" class="modal-overlay" onclick="if(event.target===this) closeSellModal()">
-    <div class="modal-box">
+    <div class="modal-box modal-box-wide">
       <div class="modal-header">
         <h2 id="sell-modal-title"></h2>
         <button class="secondary" onclick="closeSellModal()">Close</button>
       </div>
-      <div class="add-form">
-        <div><label>Shares sold</label><input id="sell-shares" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
-        <div><label title="The tool works out the tax itself from the year's losses, so it needs the amount before tax. On Trade Republic: the order total (after the 1 € fee), not what reached your cash.">Sale total before tax (EUR)</label><input id="sell-total" type="text" inputmode="decimal" oninput="updateSellPreview()" placeholder="e.g. 3.155,00 or 3155" /></div>
+      <div id="sell-form">
+        <div id="sell-screens"></div>
+        <div class="add-form">
+          <div><label>Shares sold</label><input id="sell-shares" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+          <div><label title="On Trade Republic: the Total on the sale's own screen, not the amount in your transactions list, which is after tax.">Sale total before tax (EUR)</label><input id="sell-total" type="text" inputmode="decimal" oninput="updateSellPreview()" placeholder="e.g. 3.155,00 or 3155" /></div>
+          <div><label>Sell date</label><input id="sell-date" type="date" /></div>
+          <div><label>Sell time</label><input id="sell-time" type="time" /></div>
+        </div>
         <div id="sell-ref-price" class="subtitle"></div>
         <div id="sell-preview" class="subtitle"></div>
-        <div><label>Sell date</label><input id="sell-date" type="date" /></div>
-        <div><label>Sell time</label><input id="sell-time" type="time" /></div>
-        <button onclick="submitSell()">Confirm sell</button>
+        <p class="subtitle">From the sale's Tax screen:</p>
+        <div class="add-form">
+          <div><label>Gross gain or loss</label><input id="sell-gain" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+          <div><label>Tax paid</label><input id="sell-tax-paid" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+        </div>
+        <p class="subtitle">What your bank shows now:</p>
+        <div class="add-form">
+          <div id="sell-cash-box"><label>Cash (Available)</label><input id="sell-cash" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+          <div><label title="On Trade Republic: Exemption order, the second number.">Allowance left</label><input id="sell-allow" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+          <div><label>Loss pot stocks</label><input id="sell-pot" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+          <div><label>Loss pot other</label><input id="sell-other" type="text" inputmode="decimal" oninput="updateSellPreview()" /></div>
+        </div>
+        <div id="sell-checks"></div>
+        <div class="add-form" style="margin-top:0.6rem"><button onclick="submitSell()">Confirm sell</button></div>
       </div>
+      <div id="sell-done" class="screen-done"></div>
     </div>
   </div>
 
