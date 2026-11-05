@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 import alpha_vantage
 import breadth
+import cash
 import cash_flow
 import concentration
 import consensus_store
@@ -44,6 +45,7 @@ TAX_SETTINGS_FILE = Path(__file__).parent / "data" / "tax_settings.json"
 # Her sizing rules (2026-10-11). The amounts are personal and this repository is public, so
 # they live only in data/ — with no file the rules panel simply says so.
 SIZING_RULES_FILE = Path(__file__).parent / "data" / "sizing_rules.json"
+CASH_FILE = Path(__file__).parent / "data" / "cash.json"
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
@@ -348,6 +350,11 @@ SALE_PRICE_SANITY_FACTOR = 10
 PRICE_MISMATCH_FACTOR = 10
 
 
+def now_stamp() -> str:
+    """Local time, the same clock as a sale's typed sell time, so the two compare directly."""
+    return datetime.now().isoformat(timespec="seconds")
+
+
 def find_holding(holdings: list[dict], holding_id: str) -> dict:
     for h in holdings:
         if h["id"] == holding_id:
@@ -403,6 +410,7 @@ def create_holding(holding: HoldingIn):
             "shares": holding.shares,
             "cost_basis": holding.cost_basis,
             "purchase_date": holding.purchase_date,
+            "recorded_at": now_stamp(),
         }],
         "stop_price": holding.stop_price,
         "reference_high": reference_high,
@@ -439,6 +447,7 @@ def add_lot(holding_id: str, lot: LotIn):
         "shares": lot.shares,
         "cost_basis": lot.cost_basis,
         "purchase_date": lot.purchase_date,
+        "recorded_at": now_stamp(),
     })
     recompute_aggregates(holding)
     save_holdings(holdings)
@@ -454,7 +463,8 @@ def update_lot(holding_id: str, lot_index: int, lot: LotUpdate):
         raise HTTPException(status_code=404, detail="Lot not found")
     if lot.shares <= 0 or lot.cost_basis < 0:
         raise HTTPException(status_code=422, detail="Shares must be > 0 and cost basis >= 0.")
-    lots[lot_index] = {"shares": lot.shares, "cost_basis": lot.cost_basis, "purchase_date": lot.purchase_date}
+    # Spread first: correcting a lot must not lose when it was recorded (cash.py reads that).
+    lots[lot_index] = {**lots[lot_index], "shares": lot.shares, "cost_basis": lot.cost_basis, "purchase_date": lot.purchase_date}
     recompute_aggregates(holding)
     save_holdings(holdings)
     return holding
@@ -605,7 +615,10 @@ def sell_holding(holding_id: str, sell: SellRequest):
             continue
         take = min(lot["shares"], remaining)
         total_spend += take * lot["cost_basis"]
-        lots_sold.append({"shares": take, "cost_basis": lot["cost_basis"], "purchase_date": lot["purchase_date"]})
+        sold_lot = {"shares": take, "cost_basis": lot["cost_basis"], "purchase_date": lot["purchase_date"]}
+        if lot.get("recorded_at"):
+            sold_lot["recorded_at"] = lot["recorded_at"]
+        lots_sold.append(sold_lot)
         remaining -= take
         leftover = lot["shares"] - take
         if leftover > 1e-9:
@@ -1642,6 +1655,28 @@ def put_tax_settings(broker: str, body: BankTaxIn):
     settings[broker] = entry
     TAX_SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
     return settings
+
+
+class CashIn(BaseModel):
+    amount: float
+
+
+def cash_now() -> dict:
+    entry = json.loads(CASH_FILE.read_text()) if CASH_FILE.exists() else None
+    return cash.current(entry, active_only(load_holdings()), load_sales_history())
+
+
+@app.get("/api/cash")
+def get_cash():
+    return cash_now()
+
+
+@app.put("/api/cash")
+def put_cash(body: CashIn):
+    if body.amount < 0:
+        raise HTTPException(status_code=422, detail="The amount can't be negative.")
+    CASH_FILE.write_text(json.dumps({"amount": body.amount, "as_of": now_stamp()}, indent=2))
+    return cash_now()
 
 
 @app.get("/api/portfolio-history")

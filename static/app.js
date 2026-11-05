@@ -1577,6 +1577,75 @@ async function render() {
   document.getElementById("grand-total").textContent = fmt(grandTotal);
   document.getElementById("grand-total-label").textContent = old.length ? "Active holdings total" : "Total value of assets";
   document.getElementById("active-share-classes").innerHTML = shareClassNote(holdings, grandTotal, "of active holdings");
+  await renderCash();
+}
+
+// Money waiting at the broker after a sale. See cash.py. render() runs on every sale, purchase
+// and price refresh, so the line stays current; an open edit box is left alone, or a refresh
+// finishing mid-typing would close it.
+let cashEditing = false;
+let lastCash = null;
+
+async function renderCash() {
+  if (cashEditing) return;
+  const el = document.getElementById("cash-line");
+  try {
+    lastCash = await (await fetch("/api/cash")).json();
+  } catch (e) {
+    el.innerHTML = "";
+    return;
+  }
+  if (!lastCash.entered || lastCash.amount < 0) {
+    const why = lastCash.entered
+      ? "You bought more than the last figure held, so money must have come in. Enter what Trade Republic shows now."
+      : "Enter it once. After that, your sales add to it and your purchases take from it.";
+    el.innerHTML = `Uninvested money: <span class="ticker-name" title="${why}" onclick="editCash()">enter what Trade Republic shows</span>`;
+    return;
+  }
+  const lines = [`${fmt(lastCash.typed)} you entered on ${euDate(lastCash.as_of)}`];
+  lastCash.changes.forEach((c) => {
+    lines.push(`${c.kind === "sold" ? "+" : "−"} ${fmt(c.amount)} ${c.kind} ${c.ticker} on ${euDate(c.date)}`);
+  });
+  if (lastCash.changes.length) lines.push("Sales count before tax, so this can differ a little.");
+  lines.push("Click to enter what Trade Republic shows.");
+  el.innerHTML = `Uninvested money: <strong class="ticker-name" title="${escapeHtml(lines.join("\n"))}" onclick="editCash()">${
+    lastCash.changes.length ? "about " : ""
+  }${fmt(lastCash.amount)}</strong>`;
+}
+
+function euDate(iso) {
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+}
+
+function editCash() {
+  cashEditing = true;
+  const value = lastCash && lastCash.entered && lastCash.amount >= 0 ? toEuInput(Math.round(lastCash.amount * 100) / 100) : "";
+  document.getElementById("cash-line").innerHTML = `Uninvested money:<input id="cash-input" type="text" inputmode="decimal" value="${value}" onkeydown="if (event.key === 'Enter') saveCash()" /><button onclick="saveCash()">Save</button> <button class="secondary" onclick="cancelCash()">Cancel</button>`;
+  document.getElementById("cash-input").focus();
+}
+
+function cancelCash() {
+  cashEditing = false;
+  renderCash();
+}
+
+async function saveCash() {
+  const amount = parseEuNumber(document.getElementById("cash-input").value);
+  if (isNaN(amount) || amount < 0) {
+    alert("Please enter the amount as a number, for example 1.234,56.");
+    return;
+  }
+  const res = await fetch("/api/cash", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount }),
+  });
+  if (!res.ok) {
+    alert("Could not save the amount.");
+    return;
+  }
+  cashEditing = false;
+  renderCash();
 }
 
 function isOld(h) {
