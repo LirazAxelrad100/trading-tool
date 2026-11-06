@@ -3237,8 +3237,27 @@ async function figuresBefore(h) {
   }
 }
 
+// A set with a cut image keeps its button: that pause is the chance to check the tax ID is gone
+// before anything leaves the machine. Any other set reads itself once every screen is in.
+function screensReadThemselves(kind) {
+  return !SCREEN_SLOTS[kind].some((s) => s.cut);
+}
+
+function renderReadButton(panelId) {
+  const state = screenState[panelId];
+  const box = document.getElementById(`${panelId}-read`);
+  if (screensReadThemselves(state.kind)) return;
+  const cutAdded = SCREEN_SLOTS[state.kind].some((s) => s.cut && state.blobs[s.key]);
+  box.innerHTML = `<button class="secondary" onclick="readScreens('${panelId}')">${
+    cutAdded ? "Tax ID not showing? Read the screens" : "Read the screens"
+  }</button>`;
+}
+
 function mountScreens(panelId, kind, onRead) {
-  screenState[panelId] = { kind, blobs: {}, read: null, onRead };
+  screenState[panelId] = { kind, blobs: {}, read: null, onRead, readToken: 0 };
+  const intro = screensReadThemselves(kind)
+    ? "Add these screens from Trade Republic. They're read as soon as all of them are in."
+    : "Add these screens from Trade Republic, then press Read.";
   const slots = SCREEN_SLOTS[kind]
     .map(
       (s) => `<div class="screen-slot">
@@ -3249,11 +3268,28 @@ function mountScreens(panelId, kind, onRead) {
     )
     .join("");
   document.getElementById(panelId).innerHTML = `<div class="screen-panel">
-    <p class="subtitle">Add these screens from Trade Republic, then press Read. Nothing is saved until you confirm. The screens go to Anthropic to be read, and aren't kept.</p>
+    <p class="subtitle">${intro} Nothing is saved until you confirm. The screens go to Anthropic to be read, and aren't kept.</p>
     <div class="screen-slots">${slots}</div>
-    <button class="secondary" onclick="readScreens('${panelId}')">Read the screens</button>
+    <div id="${panelId}-read"></div>
     <div id="${panelId}-status"></div>
   </div>`;
+  renderReadButton(panelId);
+}
+
+function afterScreenChange(panelId) {
+  const state = screenState[panelId];
+  renderReadButton(panelId);
+  if (!screensReadThemselves(state.kind)) return;
+  const missing = SCREEN_SLOTS[state.kind].filter((s) => !state.blobs[s.key]).map((s) => s.label);
+  if (!missing.length) {
+    readScreens(panelId);
+    return;
+  }
+  // Also cancels a read still running for the set as it was before this change.
+  state.readToken++;
+  document.getElementById(`${panelId}-status`).innerHTML = Object.keys(state.blobs).length
+    ? `<div class="subtitle">Still needed: ${escapeHtml(missing.join(", "))}.</div>`
+    : "";
 }
 
 async function pickScreen(panelId, key, input) {
@@ -3263,16 +3299,19 @@ async function pickScreen(panelId, key, input) {
   delete state.blobs[key];
   note.innerHTML = "";
   const file = input.files[0];
-  if (!file) return;
-  try {
-    const blob = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
-    state.blobs[key] = blob;
-    note.innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="" />${
-      slot.cut ? `<div class="subtitle">Top cut off. Check your tax ID isn't showing.</div>` : ""
-    }`;
-  } catch (e) {
-    note.innerHTML = `<div class="sell-warn">This image can't be opened here. Try a PNG or JPEG.</div>`;
+  if (file) {
+    try {
+      const blob = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
+      state.blobs[key] = blob;
+      note.innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="" />${
+        slot.cut ? `<div class="subtitle">Top cut off. Check your tax ID isn't showing.</div>` : ""
+      }`;
+    } catch (e) {
+      note.innerHTML = `<div class="sell-warn">This image can't be opened here. Try a PNG or JPEG.</div>`;
+    }
   }
+  // The window may have been closed and reopened while the image was being prepared.
+  if (screenState[panelId] === state) afterScreenChange(panelId);
 }
 
 async function prepareScreen(file, cutTop) {
@@ -3301,13 +3340,21 @@ async function readScreens(panelId) {
   const form = new FormData();
   keys.forEach((k) => form.append(k, state.blobs[k], `${k}.jpg`));
   status.innerHTML = `<div class="subtitle">Reading…</div>`;
+  // A slower reply for screens since replaced, or for a window since reopened, must not fill the form.
+  const token = ++state.readToken;
+  const stale = () => screenState[panelId] !== state || token !== state.readToken;
+  // A set that reads itself has no button, so a failed read needs its own way to try again.
+  const retry = screensReadThemselves(state.kind)
+    ? ` <button class="secondary" onclick="readScreens('${panelId}')">Try again</button>`
+    : "";
   try {
     const res = await fetch("/api/screens/read", { method: "POST", body: form });
     const body = await res.json().catch(() => ({}));
+    if (stale()) return;
     if (!res.ok) {
       status.innerHTML = `<div class="sell-warn">${escapeHtml(
         typeof body.detail === "string" ? body.detail : "The screens couldn't be read. You can type the numbers."
-      )}</div>`;
+      )}${retry}</div>`;
       return;
     }
     state.read = body;
@@ -3318,7 +3365,8 @@ async function readScreens(panelId) {
       (missing.length ? `<div class="subtitle">Not added: ${escapeHtml(missing.join(", "))}.</div>` : "");
     state.onRead(body);
   } catch (e) {
-    status.innerHTML = `<div class="sell-warn">The screens couldn't be read. You can type the numbers.</div>`;
+    if (stale()) return;
+    status.innerHTML = `<div class="sell-warn">The screens couldn't be read. You can type the numbers.${retry}</div>`;
   }
 }
 
