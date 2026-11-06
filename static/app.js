@@ -3407,7 +3407,7 @@ function saleChecks(i) {
     } else if (has(i.taxPaid) && i.taxPaid > 0 && near(bankGain - toolGain, i.taxPaid, SALE_GAIN_TOLERANCE)) {
       out.push({
         ok: false,
-        text: `The total looks like the amount after tax. With the tax added it would be ${fmt(i.total + i.taxPaid)}. Use the Total on the sale's own screen.`,
+        text: `The total looks like the amount after tax. With the tax added it would be ${fmt(i.total + i.taxPaid)}. It should be shares × price − fee.`,
       });
     } else {
       out.push({ ok: false, text: `Your bank's profit is ${fmt(bankGain)}, the tool's is ${fmt(toolGain)}. Check the shares and the total.` });
@@ -4214,7 +4214,18 @@ function fillSellFromScreens(r) {
   const taxScreen = r.sale_tax || {};
   const overview = r.tax_overview || {};
   set("sell-shares", sale.shares);
-  set("sell-total", sale.total);
+  // Not the screen's Total: once the sale screen has a Tax row, that Total is after tax (AMD,
+  // 06.11), and before it has one, it is before tax (MU, 05.11). This is before tax either way.
+  const total = has(sale.shares) && has(sale.price) && has(sale.fee)
+    ? Math.round((sale.shares * sale.price - sale.fee) * 100) / 100
+    : null;
+  document.getElementById("sell-total").value = total === null ? "" : toEuInput(total);
+  if (total === null && r.sale) {
+    document.getElementById("sell-screens-status").insertAdjacentHTML(
+      "beforeend",
+      `<div class="sell-warn">The shares, price or fee couldn't be read, so type the total yourself: shares × price − fee.</div>`
+    );
+  }
   if (sale.date) document.getElementById("sell-date").value = sale.date;
   if (sale.time) document.getElementById("sell-time").value = sale.time;
   set("sell-gain", taxScreen.gross_gain);
