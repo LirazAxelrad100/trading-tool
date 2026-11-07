@@ -1576,6 +1576,20 @@ def price_history(ticker: str, days: int = 30):
     return {"ticker": ticker, "prices": eur_prices, "change_pct": change_pct}
 
 
+@app.get("/api/prices/{ticker}/long-history")
+def long_price_history(ticker: str, cached_only: bool = False):
+    """Weekly closes for the whole history, in USD. cached_only answers without spending an
+    Alpha Vantage call, so Analyze can show the chart for free when it was already fetched."""
+    ticker = ticker.upper()
+    try:
+        weekly = alpha_vantage.fetch_weekly_prices(ticker, cached_only=cached_only)
+    except AlphaVantageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if weekly is None:
+        return {"ticker": ticker, "cached": False}
+    return {"ticker": ticker, "cached": True, "prices": weekly}
+
+
 @app.get("/api/opportunities-b")
 def get_opportunities_b():
     return opportunities_b.load_opportunities_b()

@@ -187,7 +187,28 @@ button.danger { background: var(--rust); }
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
 }
-.risk-badge .subtitle { display: block; margin-top: 0.2rem; }
+.risk-badge .subtitle { display: block; margin: 0.2rem 0 0; }
+
+.long-chart { margin-top: 0.6rem; }
+.long-chart-ranges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.35rem; }
+.long-chart .long-chart-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.long-chart .long-chart-btn:hover, .long-chart .long-chart-btn.active { color: var(--text); border-color: var(--muted); }
+.long-chart-plot { position: relative; }
+.long-chart-plot .price-chart-svg { height: 140px; }
+.long-chart-tick, .long-chart-guide { position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none; }
+.long-chart-tick { background: var(--border); }
+.long-chart-guide { background: var(--muted); }
+.long-chart-years { position: relative; height: 1.2em; font-size: 0.75rem; color: var(--muted); }
+.long-chart-years span { position: absolute; transform: translateX(-50%); }
+.long-chart-note { font-size: 0.75rem; }
 
 .sell-warn { color: var(--amber); font-size: 0.82rem; margin-top: 0.35rem; }
 

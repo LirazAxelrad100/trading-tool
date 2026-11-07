@@ -1102,16 +1102,138 @@ function typicalMovesText(moves) {
   return `On a typical day it moves ${parts.join(" · ")}.${trend}`;
 }
 
-function renderRisk(v) {
+function fmtUsd(n) {
+  const digits = n >= 100 ? 0 : 2;
+  return "$" + new Intl.NumberFormat("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+}
+
+function fmtSignedPct(pct) {
+  return `${pct >= 0 ? "+" : ""}${fmtPct(pct / 100)}`;
+}
+
+// Two separate facts, because they answer different questions: where the price went, and how
+// bumpy the way there was. The yearly figure that sets the level is on hover only: "50,3% a
+// year" on a stock that ended 3% up reads as a change in price, which it is not.
+function renderRisk(v, ticker) {
   if (!v || v.error) {
     return `<div class="risk-badge"><strong>Volatility: —</strong> <span class="subtitle">${v && v.error ? v.error : "not enough price history"}</span></div>`;
   }
   const cls = v.label === "Low" ? "price-up" : v.label === "Very high" || v.label === "High" ? "price-down" : "";
+  const hover = `The level comes from a yearly figure for how big the daily moves are, up or down: ${fmtPct(v.annualized_pct / 100)}. Under 20% Low, under 35% Moderate, under 55% High, above that Very high. It is not a change in price. Looks backward only, not a prediction.`;
+  const s = v.swings;
+  const vsOthers = {
+    less: "which is less than most stocks in this tool",
+    average: "which is average for the stocks in this tool",
+    more: "which is more than most stocks in this tool",
+  }[s.ordinary_vs_others];
+  const bigDays = s.big_days
+    ? `On ${s.big_days} of ${s.days} days it moved more than ${s.big_day_pct}%, and the biggest day was ${fmtSignedPct(s.biggest_pct)}.`
+    : `It never moved more than ${s.big_day_pct}% in ${s.days} days. The biggest day was ${fmtSignedPct(s.biggest_pct)}.`;
   return `
     <div class="risk-badge">
-      <strong>Volatility: <span class="${cls}">${v.label}</span></strong>
-      <span class="subtitle">${fmtPct(v.annualized_pct / 100)} a year — how much the price has swung day to day over the last ${v.days_used} trading days, scaled to a yearly figure to compare across stocks. ${typicalMovesText(v.typical_moves)} Looks backward only, not a prediction.</span>
+      <strong>Volatility: <span class="${cls}" title="${hover}">${v.label}</span></strong>
+      <span class="subtitle"><strong>Price, last ${v.days_used} trading days:</strong> ${fmtUsd(v.price.from)} → ${fmtUsd(v.price.to)} (${fmtSignedPct(v.price.change_pct)})</span>
+      <span class="subtitle"><strong>Daily swings:</strong> an ordinary day moves about ${fmtPct(s.ordinary_pct / 100)}, ${vsOthers}. ${bigDays}</span>
+      ${ticker ? `<div class="long-chart" data-long-chart="${escapeHtml(ticker)}"></div>` : ""}
     </div>`;
+}
+
+// The price over years, from weekly closes. Opens by itself when it was already fetched this
+// week; otherwise a button, since it spends one of the 25 daily Alpha Vantage calls.
+let longChartYears = 5;
+
+function mountLongCharts(root) {
+  root.querySelectorAll("[data-long-chart]").forEach((el) => loadLongChart(el, false));
+}
+
+async function loadLongChart(el, spend) {
+  const ticker = el.dataset.longChart;
+  if (spend) el.innerHTML = `<p class="subtitle">Loading…</p>`;
+  try {
+    const res = await fetch(`/api/prices/${encodeURIComponent(ticker)}/long-history${spend ? "" : "?cached_only=true"}`);
+    if (!res.ok) throw new Error((await res.json()).detail || "unavailable");
+    const result = await res.json();
+    if (!result.cached) {
+      el.innerHTML = `<button type="button" class="long-chart-btn">See the price over the years</button>`;
+      el.querySelector("button").addEventListener("click", () => loadLongChart(el, true));
+      return;
+    }
+    el.longPrices = result.prices;
+    renderLongChart(el);
+  } catch (e) {
+    el.innerHTML = `<p class="subtitle">Chart unavailable: ${escapeHtml(e.message)}</p>
+      <button type="button" class="long-chart-btn">Try again</button>`;
+    el.querySelector("button").addEventListener("click", () => loadLongChart(el, true));
+  }
+}
+
+function renderLongChart(el) {
+  const all = el.longPrices;
+  if (!all || all.length < 2) {
+    el.innerHTML = `<p class="subtitle">Not enough price history for a longer chart.</p>`;
+    return;
+  }
+  const first = all[0].date;
+  const last = all[all.length - 1].date;
+  const startFor = (years) => `${Number(last.slice(0, 4)) - years}${last.slice(4)}`;
+  // A range is offered only if the history reaches back that far; "since" is always there.
+  const ranges = [1, 3, 5, 10].filter((y) => first <= startFor(y)).map((y) => ({ years: y, label: y === 1 ? "1 year" : `${y} years` }));
+  ranges.push({ years: 0, label: `Since ${first.slice(0, 4)}` });
+  const years = ranges.some((r) => r.years === longChartYears) ? longChartYears : 0;
+  const prices = years ? all.filter((p) => p.date >= startFor(years)) : all;
+
+  const closes = prices.map((p) => p.close);
+  const from = closes[0];
+  const to = closes[closes.length - 1];
+  const change = (to / from - 1) * 100;
+  const label = ranges.find((r) => r.years === years).label;
+
+  // One mark per January, thinned so a long history doesn't fill the row with years.
+  let marks = [];
+  for (let i = 1; i < prices.length; i++) {
+    if (prices[i].date.slice(0, 4) !== prices[i - 1].date.slice(0, 4)) {
+      marks.push({ year: prices[i].date.slice(0, 4), left: (i / (prices.length - 1)) * 100 });
+    }
+  }
+  const step = Math.ceil(marks.length / 7) || 1;
+  marks = marks.filter((m, i) => i % step === 0 && m.left < 96);
+
+  el.innerHTML = `
+    <div class="long-chart-ranges">${ranges
+      .map((r) => `<button type="button" class="long-chart-btn${r.years === years ? " active" : ""}" data-years="${r.years}">${r.label}</button>`)
+      .join("")}</div>
+    <p class="subtitle"><strong>${label}:</strong> ${fmtUsd(from)} → ${fmtUsd(to)} (${fmtSignedPct(change)}). Lowest ${fmtUsd(Math.min(...closes))}, highest ${fmtUsd(Math.max(...closes))}.</p>
+    <p class="subtitle chart-readout"></p>
+    <div class="long-chart-plot">
+      ${buildPriceChartSVG(prices, change)}
+      ${marks.map((m) => `<span class="long-chart-tick" style="left:${m.left}%"></span>`).join("")}
+      <span class="long-chart-guide" style="display:none"></span>
+    </div>
+    <div class="long-chart-years">${marks.map((m) => `<span style="left:${m.left}%">${m.year}</span>`).join("")}</div>
+    <p class="subtitle long-chart-note">Weekly closes in dollars, up to ${last.split("-").reverse().join(".")}. Corrected for splits and dividends, so old prices can be lower than the price shown at the time.</p>`;
+
+  el.querySelectorAll("[data-years]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      longChartYears = Number(btn.dataset.years);
+      renderLongChart(el);
+    })
+  );
+  // The svg stretches (preserveAspectRatio="none"), so the cursor is mapped through its real width.
+  const plot = el.querySelector(".long-chart-plot");
+  const readout = el.querySelector(".chart-readout");
+  const guide = el.querySelector(".long-chart-guide");
+  plot.addEventListener("mousemove", (e) => {
+    const box = plot.getBoundingClientRect();
+    const share = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+    const point = prices[Math.round(share * (prices.length - 1))];
+    readout.textContent = `${point.date.split("-").reverse().join(".")}: ${fmtUsd(point.close)}`;
+    guide.style.display = "block";
+    guide.style.left = `${share * 100}%`;
+  });
+  plot.addEventListener("mouseleave", () => {
+    readout.textContent = "";
+    guide.style.display = "none";
+  });
 }
 
 // One compact line. The user has twice said today's move is low value and already visible
@@ -1262,7 +1384,7 @@ function renderSignals(result) {
     renderFundamentals(result.fundamentals) +
     renderSectorContext(result.sector_context, (result.fundamentals || {}).price_3m_pct) +
     renderOppBScore(result.opp_b_score) +
-    renderRisk(result.volatility) +
+    renderRisk(result.volatility, result.ticker) +
     renderMomentum(result.momentum) +
     renderContradictions(sig.contradictions) +
     renderEarningsRisk(sig.earnings_risk)
@@ -1288,6 +1410,7 @@ async function analyzeTicker(ticker) {
       renderSignals(result) +
       `<div id="insider-slot" class="subtitle">Reading insider filings…</div>` +
       `<p class="analysis-text">${renderAnalysisText(result.analysis)}</p>`;
+    mountLongCharts(body);
     loadInsiders(ticker);
   } catch (e) {
     body.innerHTML = `<p class="empty">Failed to generate analysis: ${e}</p>`;
@@ -1431,6 +1554,7 @@ async function compareTickers(aId = "compare-a", bId = "compare-b") {
     }
     const result = await res.json();
     body.innerHTML = renderCompareColumn(result.a) + renderCompareColumn(result.b);
+    mountLongCharts(body);
   } catch (e) {
     body.innerHTML = `<p class="empty">Failed to compare: ${e}</p>`;
   }

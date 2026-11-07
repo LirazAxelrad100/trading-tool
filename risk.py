@@ -38,7 +38,8 @@ def compute_volatility(ticker: str, days: int = 90) -> dict:
     actually swung day to day, annualized. Purely descriptive, backward-looking:
     not a forecast of future moves. Reuses alpha_vantage's per-ticker-per-day price
     cache, so it costs nothing extra if the ticker's chart was already viewed today."""
-    all_closes = [p["close"] for p in alpha_vantage.fetch_daily_prices(ticker, days=100)]
+    bars = alpha_vantage.fetch_daily_prices(ticker, days=100)
+    all_closes = [p["close"] for p in bars]
     closes = all_closes[-days:]
     if len(closes) < 10:
         return {"error": "Not enough price history to estimate volatility."}
@@ -53,6 +54,35 @@ def compute_volatility(ticker: str, days: int = 90) -> dict:
         "label": label,
         "days_used": len(closes),
         "typical_moves": typical_moves(all_closes),
+        "price": {
+            "from": closes[0],
+            "to": closes[-1],
+            "change_pct": (closes[-1] / closes[0] - 1) * 100,
+        },
+        "swings": _swings(closes),
+    }
+
+
+# Rough quartiles of the ordinary day across the single stocks in this tool (72 of them,
+# 2026-11-07: 1,36% / 1,73% / 2,65%). Fixed, like VOL_BANDS, so a stock's wording doesn't change
+# because of which other tickers happen to be cached.
+ORDINARY_DAY_BANDS = [(1.3, "less"), (2.7, "average")]
+BIG_DAY_PCT = 3
+
+
+def _swings(closes: list) -> dict:
+    """The daily moves as a person reads them. The yearly figure blends the ordinary day and the
+    rare jump into one number, and a stock with calm days and a few jumps is a different thing
+    from one that moves a lot every day."""
+    moves = [(closes[i] / closes[i - 1] - 1) * 100 for i in range(1, len(closes))]
+    ordinary = statistics.median(abs(m) for m in moves)
+    return {
+        "ordinary_pct": ordinary,
+        "ordinary_vs_others": next((w for cutoff, w in ORDINARY_DAY_BANDS if ordinary < cutoff), "more"),
+        "days": len(moves),
+        "big_days": sum(1 for m in moves if abs(m) > BIG_DAY_PCT),
+        "big_day_pct": BIG_DAY_PCT,
+        "biggest_pct": max(moves, key=abs),
     }
 
 

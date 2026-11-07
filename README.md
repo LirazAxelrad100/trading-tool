@@ -142,7 +142,7 @@ Note: `WatchPaths` fires on *any* change to `~/Downloads`, not just Zacks files 
 Everything here is descriptive. It surfaces facts and never says what to buy or sell.
 
 - **Analyze** (per ticker) opens a popup with a prose synthesis plus standalone badges:
-  - *Volatility* — how much the price has actually swung, annualised. Backward-looking, labelled as such.
+  - *Volatility* — two separate facts: where the price went over the last 90 trading days, and how big the daily swings were (the ordinary day, how many big days, the biggest one). Below them, a chart of the price over 1 to 10 years or the whole history, from free weekly closes. Prices are corrected for splits. Backward-looking, labelled as such.
   - *Today's momentum* — a sharp move up, an already-extended run, or a sharp fall — together with the trend underneath it, so a jump inside a decline reads as a bounce rather than a breakout.
   - *Price vs. profits* — did the share price move with profits, or did one outrun the other? Shows how much of a gain came from the business earning more versus the market simply paying more, which is the lens every other signal here structurally misses.
   - *Tensions* — deterministic contradiction flags (positive ratings against a sustained decline, a burst inside a downtrend, Zacks disagreeing with Opportunities B).
