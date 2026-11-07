@@ -205,10 +205,12 @@ def fetch_earnings_calendar(ticker: str) -> dict:
         "calendar/earnings",
         {"symbol": ticker, "from": today.isoformat(), "to": (today + timedelta(days=120)).isoformat()},
     )
-    upcoming = data.get("earningsCalendar") or []
+    # Finnhub lists the latest date first, so the first row was the report after next whenever
+    # two fell inside the window: ADI showed February instead of 24.11 (2026-11-07).
+    upcoming = [e for e in data.get("earningsCalendar") or [] if e.get("date")]
     if not upcoming:
         return {}
-    next_event = upcoming[0]
+    next_event = min(upcoming, key=lambda e: e["date"])
     return {
         "date": next_event.get("date"),
         "hour": next_event.get("hour"),
