@@ -21,6 +21,24 @@ class AlphaVantageError(Exception):
     pass
 
 
+# The free key refuses bursts faster than about one call a second, and the web server answers
+# requests in parallel threads. Six stop-hit panels asking at once on page load lost five of
+# their six answers (2026-11-07). Every call takes the next free slot, so a burst just waits.
+MIN_CALL_GAP_SECONDS = 1.5
+_slot_lock = threading.Lock()
+_next_slot = 0.0
+
+
+def _wait_for_slot() -> None:
+    global _next_slot
+    with _slot_lock:
+        now = time.time()
+        slot = max(now, _next_slot)
+        _next_slot = slot + MIN_CALL_GAP_SECONDS
+    if slot > now:
+        time.sleep(slot - now)
+
+
 def _write_json(path: Path, data) -> None:
     """Write to a temp file and swap it in. Two charts opened at once run in parallel
     threads; a plain write_text from both left the longer write's tail after the shorter
@@ -52,6 +70,7 @@ def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
 
     if not ALPHA_VANTAGE_API_KEY:
         raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
+    _wait_for_slot()
     try:
         res = requests.get(
             ALPHA_VANTAGE_URL,
@@ -104,7 +123,6 @@ def fetch_news_sentiment(ticker: str, limit: int = 10) -> dict:
 
 DIVIDENDS_CACHE_FILE = Path(__file__).parent / "data" / "dividends_cache.json"
 DIVIDENDS_REFRESH_DAYS = 7  # dividends are declared ~2 weeks ahead and paid quarterly
-_last_dividend_call = 0.0
 
 
 def fetch_dividends(ticker: str, cached_only: bool = False) -> list:
@@ -115,7 +133,6 @@ def fetch_dividends(ticker: str, cached_only: bool = False) -> list:
     Cached a week per ticker: the list only changes when a new dividend is declared, and the
     free key's 25 calls a day are shared with price history and sentiment. A failed fetch
     falls back to whatever is cached, however old, since a dividend paid stays paid."""
-    global _last_dividend_call
     cache = json.loads(DIVIDENDS_CACHE_FILE.read_text()) if DIVIDENDS_CACHE_FILE.exists() else {}
     cached = cache.get(ticker)
     fresh = cached and (date.today() - date.fromisoformat(cached["fetched_date"])).days < DIVIDENDS_REFRESH_DAYS
@@ -126,11 +143,7 @@ def fetch_dividends(ticker: str, cached_only: bool = False) -> list:
     if not ALPHA_VANTAGE_API_KEY:
         raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
 
-    # The free key also refuses bursts faster than about one call a second.
-    wait = 1.5 - (time.time() - _last_dividend_call)
-    if wait > 0:
-        time.sleep(wait)
-    _last_dividend_call = time.time()
+    _wait_for_slot()
     try:
         res = requests.get(
             ALPHA_VANTAGE_URL,
@@ -236,7 +249,7 @@ def _refresh_splits(ticker: str, bars: list) -> list:
     if not suspect or (cached and cached["fetched_date"] > suspect):
         return (cached or {}).get("splits", [])
 
-    time.sleep(1.2)  # this follows the price call, and the free key refuses bursts
+    _wait_for_slot()
     try:
         res = requests.get(
             ALPHA_VANTAGE_URL,
@@ -308,6 +321,7 @@ def fetch_weekly_prices(ticker: str, cached_only: bool = False) -> Optional[list
         return None
     if not ALPHA_VANTAGE_API_KEY:
         raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
+    _wait_for_slot()
     try:
         res = requests.get(
             ALPHA_VANTAGE_URL,
@@ -355,6 +369,7 @@ def fetch_daily_prices(ticker: str, days: int = 30) -> list:
 
     if not ALPHA_VANTAGE_API_KEY:
         raise AlphaVantageError("ALPHA_VANTAGE_API_KEY is not set in .env")
+    _wait_for_slot()
     try:
         res = requests.get(
             ALPHA_VANTAGE_URL,
