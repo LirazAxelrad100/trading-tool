@@ -42,6 +42,10 @@ PORTFOLIO_HISTORY_FILE = Path(__file__).parent / "data" / "portfolio_history.jso
 HOLDINGS_HISTORY_FILE = Path(__file__).parent / "data" / "holdings_history.json"
 WATCHLIST_FILE = Path(__file__).parent / "data" / "watchlist.json"
 WATCHLIST_HISTORY_FILE = Path(__file__).parent / "data" / "watchlist_history.json"
+# Her rule (2026-11-07): a company counts as AI only if more than half its sales are AI. That is a
+# reading of each company's own reports, kept by hand per ticker with a note and a date; no free
+# source answers it. In data/ because which companies she looks at is personal.
+AI_BUSINESS_FILE = Path(__file__).parent / "data" / "ai_business.json"
 WATCH_ARCHIVE_FILE = Path(__file__).parent / "data" / "watchlist_archive.json"
 TAX_SETTINGS_FILE = Path(__file__).parent / "data" / "tax_settings.json"
 # Her sizing rules (2026-10-11). The amounts are personal and this repository is public, so
@@ -1592,7 +1596,12 @@ def long_price_history(ticker: str, cached_only: bool = False):
 
 @app.get("/api/opportunities-b")
 def get_opportunities_b():
-    return opportunities_b.load_opportunities_b()
+    """The stored shortlist, with her AI-or-not reading per ticker overlaid (see AI_BUSINESS_FILE)."""
+    data = opportunities_b.load_opportunities_b()
+    ai = json.loads(AI_BUSINESS_FILE.read_text()) if AI_BUSINESS_FILE.exists() else {}
+    for row in data.get("list") or []:
+        row["ai_business"] = ai.get(row.get("ticker"))
+    return data
 
 
 @app.post("/api/opportunities-b/refresh")

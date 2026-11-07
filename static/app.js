@@ -3122,6 +3122,14 @@ function sectorCell(sector) {
   return `${sector} <span class="${cls}">#${s.rank}</span>`;
 }
 
+// Her rule: AI only when more than half of sales are AI. The figure behind each answer is on hover,
+// so a "No" on a company like APH (about a third AI) doesn't read as "nothing to do with AI".
+function aiBusinessCell(a) {
+  if (!a) return `<span class="subtitle" title="Not checked yet">?</span>`;
+  const title = `${a.note} Checked ${a.checked.split("-").reverse().join(".")}.`;
+  return `<span title="${escapeHtml(title)}">${a.ai ? "<strong>Yes</strong>" : "No"}</span>`;
+}
+
 function renderOpportunitiesB() {
   const body = document.getElementById("opportunities-b-body");
   const rows = [...lastOppB];
@@ -3152,6 +3160,7 @@ function renderOpportunitiesB() {
       <td><span class="ticker-name" onclick="showConsensusForB('${r.ticker}')">${r.ticker}</span></td>
       <td>${r.company || "—"}</td>
       <td>${sectorCell(r.sector)}</td>
+      <td>${aiBusinessCell(r.ai_business)}</td>
       <td><strong>${Math.round(r.composite * 100)}</strong></td>
       <td>${consensusLabel(r.consensus_avg)} <span class="subtitle">(${r.consensus.strongBuy} SB / ${r.n})</span></td>
       <td>${r.beats != null ? r.beats + "/" + r.beats_total : "—"}</td>
