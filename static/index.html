@@ -23,7 +23,7 @@
       <h2>Add holding</h2>
       <div id="promotion-note" class="tensions" style="display:none"></div>
       <div class="add-form">
-        <div><label>Ticker</label><input id="f-ticker" placeholder="AAPL" onchange="loadStopDefault()" /></div>
+        <div><label>Ticker</label><input id="f-ticker" placeholder="AAPL" onchange="loadStopDefault(); lookupIsin()" /></div>
         <div><label>Shares</label><input id="f-shares" type="text" inputmode="decimal" /></div>
         <div><label>Buy in / share</label><input id="f-cost" type="text" inputmode="decimal" oninput="applyStopDefault()" /></div>
         <div><label>Purchase date</label><input id="f-date" type="date" /></div>
@@ -43,6 +43,7 @@
         <button onclick="addHolding()">Add</button>
       </div>
       <p id="stop-hint" class="subtitle"></p>
+      <p id="isin-hint" class="subtitle"></p>
       <details class="bank-tax-settings" id="add-screens-box"><summary>Fill in from Trade Republic's screens</summary>
         <div id="add-screens"></div>
         <div class="add-form"><div id="add-cash-box"><label>Cash now (Available)</label><input id="f-cash" type="text" inputmode="decimal" oninput="renderBuyChecks('add')" /></div></div>

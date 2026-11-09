@@ -1810,6 +1810,27 @@ def get_stop_history(ticker: str, cached_only: bool = False):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/isin-lookup/{ticker}")
+def isin_lookup(ticker: str):
+    """The ISIN for a ticker, found on Lang & Schwarz and confirmed by price (see
+    ls_tc.find_isin), so a purchase recorded from the trade screens is priced from L&S
+    without her typing it. `isin: None` when nothing matched; the Add form then warns."""
+    ticker = ticker.strip().upper()
+    try:
+        profile = prices._finnhub_get("stock/profile2", {"symbol": ticker}) or {}
+        company = profile.get("name")
+        if not company and opportunities_b.UNIVERSE_FILE.exists():
+            universe = json.loads(opportunities_b.UNIVERSE_FILE.read_text()).get("constituents", {})
+            company = (universe.get(ticker) or {}).get("company")
+        if not company:
+            return {"isin": None, "reason": "company name not found"}
+        expected = prices.fetch_quote_shape(ticker)["close"] * prices.fetch_usd_to_eur_rate()
+        found = ls_tc.find_isin(ticker, company, expected)
+    except PriceError as e:
+        return {"isin": None, "reason": str(e)}
+    return found or {"isin": None, "reason": "no Lang & Schwarz share matched the price"}
+
+
 @app.get("/api/risk/stop-default/{ticker}")
 def get_stop_default(ticker: str):
     """The Add form's default stop: the volatility level and the width the user set for it

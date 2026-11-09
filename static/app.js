@@ -1959,6 +1959,9 @@ async function saveEdit(id) {
   const manual_price = document.getElementById(`e-manual-${id}`).checked;
   const isin = document.getElementById(`e-isin-${id}`).value.trim();
 
+  // A manual price is the deliberate no-ISIN case, so it saves without asking.
+  if (!isin && !manual_price && !confirm(`${NO_ISIN_TEXT}\n\nSave anyway?`)) return;
+
   const payload = { ticker, stop_price, reference_high, current_price, exit_plan, manual_price, isin };
 
   // shares/cost/date inputs only exist for single-lot holdings; multi-lot edits its
@@ -2053,6 +2056,9 @@ async function addHolding() {
   stopTyped = false;
   stopDefaultToken++;
   document.getElementById("stop-hint").textContent = "";
+  document.getElementById("isin-hint").textContent = "";
+  isinAutoFilled = "";
+  isinLookupToken++;
   if (res.ok && cashNow !== null) await saveCashLine(cashNow);
   document.getElementById("add-screens-box").open = false;
   startBuyForm("add");
@@ -2114,6 +2120,70 @@ async function markRiskViewed(w) {
 let stopDefault = null;
 let stopTyped = false;
 let stopDefaultToken = 0;
+
+// The Add form looks the ISIN up by itself (2026-11-09): the trade screens never show it,
+// and without it a holding is priced from the Finnhub approximation. The server only
+// accepts a Lang & Schwarz share whose price matches (ls_tc.find_isin). One match fills the
+// field; two (share classes, like Alphabet A and C) are offered to pick, never guessed.
+let isinLookupToken = 0;
+let isinAutoFilled = ""; // what the lookup put in the field, so a new ticker may replace it
+
+function refreshAddChecks() {
+  if (document.getElementById("add-checks").innerHTML) renderBuyChecks("add");
+}
+
+async function lookupIsin() {
+  const ticker = document.getElementById("f-ticker").value.trim().toUpperCase();
+  const field = document.getElementById("f-isin");
+  const hint = document.getElementById("isin-hint");
+  const token = ++isinLookupToken;
+  const current = field.value.trim();
+  if (current && current !== isinAutoFilled) {
+    hint.textContent = ""; // she typed it herself
+    return;
+  }
+  if (current) field.value = "";
+  isinAutoFilled = "";
+  if (!/^[A-Z][A-Z.]{0,5}$/.test(ticker)) {
+    hint.textContent = "";
+    refreshAddChecks();
+    return;
+  }
+  hint.textContent = `Looking up ${ticker}'s ISIN on Lang & Schwarz…`;
+  let d;
+  try {
+    const res = await fetch(`/api/isin-lookup/${encodeURIComponent(ticker)}`);
+    d = await res.json();
+    if (!res.ok) throw new Error(d.detail || `error ${res.status}`);
+  } catch (e) {
+    if (token === isinLookupToken) {
+      hint.textContent = `Couldn't look up ${ticker}'s ISIN (${e.message}). Copy it from the stock's details on Trade Republic.`;
+      refreshAddChecks();
+    }
+    return;
+  }
+  if (token !== isinLookupToken) return; // a newer ticker was typed meanwhile
+  if (!d.isin) {
+    hint.textContent = `No ISIN found for ${ticker} on Lang & Schwarz. Copy it from the stock's details on Trade Republic.`;
+  } else if (!(d.others || []).length) {
+    field.value = d.isin;
+    isinAutoFilled = d.isin;
+    hint.innerHTML = `ISIN filled in from Lang &amp; Schwarz: <strong>${escapeHtml(d.name)}</strong> (${escapeHtml(d.isin)}). Its price there matches.`;
+  } else {
+    const options = [d, ...d.others]
+      .map((o) => `<a href="#" onclick="pickIsin('${escapeHtml(o.isin)}'); return false;">${escapeHtml(o.name)} (${escapeHtml(o.isin)})</a>`)
+      .join(" · ");
+    hint.innerHTML = `Lang &amp; Schwarz has more than one share at this price. Pick the one Trade Republic shows: ${options}`;
+  }
+  refreshAddChecks();
+}
+
+function pickIsin(isin) {
+  document.getElementById("f-isin").value = isin;
+  isinAutoFilled = isin;
+  document.getElementById("isin-hint").textContent = `ISIN set: ${isin}.`;
+  refreshAddChecks();
+}
 
 const LEVEL_WORDS = { Low: "low", Moderate: "moderate", High: "high", "Very high": "very high" };
 
@@ -2183,6 +2253,7 @@ function promoteWatchItem(id) {
   const field = document.getElementById("f-ticker");
   field.value = w.ticker;
   loadStopDefault();
+  lookupIsin();
   // Local date, not toISOString(): between midnight and 02:00 in Berlin the UTC date is
   // still yesterday — the same bug that once shifted the weekly table.
   document.getElementById("f-date").value = localToday();
@@ -3591,9 +3662,16 @@ function saleChecks(i) {
   return out;
 }
 
+// Without an ISIN a holding is priced from Finnhub's US quote converted to EUR, not from
+// Lang & Schwarz, and nothing on screen says so. The trade screens never show the ISIN, so a
+// purchase recorded from them leaves it empty unless she types it (LLY and MSFT, 2026-11-09).
+const NO_ISIN_TEXT =
+  "No ISIN, so its price will come from a US source converted to EUR, which is less exact than Lang & Schwarz. Trade Republic shows the ISIN in the stock's details.";
+
 function buyChecks(i) {
   const out = [];
   const read = i.read || {};
+  if (i.isinMissing) out.push({ ok: false, text: NO_ISIN_TEXT });
   if (i.h && read.buy && read.buy.asset && !sameCompany(read.buy.asset, i.h)) {
     out.push({ ok: false, text: `This screen is for ${read.buy.asset}, but you're adding to ${i.h.ticker}.` });
   }
@@ -3622,8 +3700,10 @@ function buyInputs(form) {
   const f = BUY_FORMS[form];
   const shares = parseEuNumber(document.getElementById(f.shares).value);
   const cost = parseEuNumber(document.getElementById(f.cost).value);
+  const h = form === "lot" ? lastHoldings.find((x) => x.id === lotsHoldingId) : null;
   return {
-    h: form === "lot" ? lastHoldings.find((x) => x.id === lotsHoldingId) : null,
+    h,
+    isinMissing: form === "lot" ? !!h && !h.isin : !document.getElementById("f-isin").value.trim(),
     spent: !isNaN(shares) && !isNaN(cost) ? shares * cost : null,
     cashNow: optionalNumber(f.cash),
     read: screenState[f.panel] ? screenState[f.panel].read : null,
@@ -3652,6 +3732,10 @@ async function startBuyForm(form) {
   });
   document.getElementById(f.cash).value = "";
   document.getElementById(f.checks).innerHTML = "";
+  // Typing the ISIN after the screens were read should clear the warning straight away.
+  if (form === "add") {
+    document.getElementById("f-isin").oninput = refreshAddChecks;
+  }
   buyBefore[form] = await figuresBefore(form === "lot" ? lastHoldings.find((x) => x.id === lotsHoldingId) : { broker: MAIN_BROKER });
 }
 

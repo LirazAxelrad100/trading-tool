@@ -14,6 +14,7 @@ calls), not HTML scraping.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -124,3 +125,114 @@ def fetch_price(isin: str) -> dict:
         "day_change_pct": day_change_pct,
         "instrument_id": instrument_id,
     }
+
+
+# --- Finding an ISIN from a ticker (2026-11-09) -----------------------------------------
+# Trade Republic's trade screens never show the ISIN, so a purchase recorded from them
+# came in without one and was priced from the Finnhub approximation (LLY and MSFT, the day
+# this was written). L&S's search does not match tickers ("AMD" finds AMDOCS, "DK" finds
+# Danish shares) and matches full company names poorly ("Microsoft Corporation" finds
+# nothing, "Microsoft" does), so the name is cleaned and shortened word by word. Shortening
+# makes it noisy ("West" for West Pharmaceutical also finds Western Digital), so a candidate
+# is accepted only when its L&S price agrees with the US price converted to EUR. That also
+# rejects CDRs and ADRs with a share ratio, whose prices are a fraction or a multiple.
+
+LOOKUP_CACHE_FILE = DATA_DIR / "isin_lookup_cache.json"
+PRICE_TOLERANCE = 0.06  # FX timing and L&S's own quote; real mismatches are far larger
+MAX_CANDIDATES = 6
+_NAME_NOISE = re.compile(
+    r"\b(inc|incorporated|corp|corporation|company|co|ltd|limited|plc|holdings?|group|"
+    r"sa|nv|ag|se|the|and|class [a-c])\b\.?",
+    re.I,
+)
+
+
+def _search(query: str) -> list:
+    resp = requests.get(
+        f"{BASE_URL}/_rpc/json/.lstc/instrument/search/main",
+        params={"q": query, "localeId": 2},
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    return [r for r in resp.json() if r.get("categorySymbol") == "STK" and r.get("isin")]
+
+
+def _last_price(instrument_id: int) -> Optional[float]:
+    """The live mid price, or the last daily close outside L&S's trading hours."""
+    for series, kind in (("intraday", "mini"), ("history", "mini")):
+        try:
+            resp = requests.get(
+                f"{BASE_URL}/_rpc/json/instrument/chart/dataForInstrument",
+                params={
+                    "container": "chart1",
+                    "instrumentId": instrument_id,
+                    "marketId": 1,
+                    "quotetype": "mid",
+                    "series": series,
+                    "type": kind,
+                    "localeId": 2,
+                },
+                headers=HEADERS,
+                timeout=TIMEOUT,
+            )
+            resp.raise_for_status()
+            points = ((resp.json().get("series") or {}).get(series) or {}).get("data") or []
+        except (requests.RequestException, ValueError):
+            continue
+        if points:
+            return points[-1][1]
+    return None
+
+
+def _name_queries(company: str) -> list:
+    """Longest first: the full cleaned name, then one word fewer each time, then the first
+    word's first four letters, because L&S abbreviates ("WESTN DIGITAL", "WEST PHARM.SVCS")."""
+    words = _NAME_NOISE.sub(" ", re.sub(r"[,.()&+]", " ", company)).split()
+    queries = []
+    for k in range(len(words), 0, -1):
+        queries.append(" ".join(words[:k]))
+        if len(words[k - 1]) > 4:  # "Meta Plat" finds "META PLATF.", "Meta Platforms" doesn't
+            queries.append(" ".join(words[: k - 1] + [words[k - 1][:4]]))
+    return list(dict.fromkeys(queries))
+
+
+def _name_score(company_words: list, displayname: str) -> int:
+    """How many of the company's words L&S's abbreviated name starts the same way (4 letters)."""
+    tokens = re.split(r"[\s.,+/-]+", displayname.upper())
+    return sum(any(t.startswith(w[:4].upper()) for t in tokens if t) for w in company_words)
+
+
+def find_isin(ticker: str, company: str, expected_eur: float) -> Optional[dict]:
+    """The ISIN of the L&S share whose price matches `expected_eur`, or None. Searches the
+    company name from longest to shortest; within one search, candidates are tried in order
+    of how well the name fits, and the closest price wins. Share classes of one company
+    (Alphabet A and C) are priced almost alike, so any other match is returned as `others`
+    for her to compare with what Trade Republic shows."""
+    ticker = ticker.strip().upper()
+    cache = json.loads(LOOKUP_CACHE_FILE.read_text()) if LOOKUP_CACHE_FILE.exists() else {}
+    if ticker in cache:
+        return cache[ticker]
+    words = _NAME_NOISE.sub(" ", re.sub(r"[,.()&+]", " ", company or "")).split()
+    seen = set()
+    for query in _name_queries(company or ""):
+        try:
+            results = _search(query)
+        except (requests.RequestException, ValueError):
+            continue
+        results = [r for r in results if r["isin"] not in seen]
+        results.sort(key=lambda r: -_name_score(words, r.get("displayname", "")))
+        matches = []
+        for r in results[:MAX_CANDIDATES]:
+            seen.add(r["isin"])
+            price = _last_price(r["instrumentId"])
+            if price and abs(price / expected_eur - 1) <= PRICE_TOLERANCE:
+                name = re.sub(r"\s+(DL|EO)-.*$|\s{2,}.*$", "", r.get("displayname", "")).strip()
+                matches.append({"isin": r["isin"], "name": name, "ls_price": price})
+        if matches:
+            matches.sort(key=lambda m: abs(m["ls_price"] / expected_eur - 1))
+            found = dict(matches[0], others=[{"isin": m["isin"], "name": m["name"]} for m in matches[1:]])
+            cache[ticker] = found
+            LOOKUP_CACHE_FILE.write_text(json.dumps(cache, indent=2, ensure_ascii=False))
+            return found
+    return None

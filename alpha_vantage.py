@@ -18,7 +18,15 @@ NEWS_SENTIMENT_CACHE_FILE = Path(__file__).parent / "data" / "news_sentiment_cac
 
 
 class AlphaVantageError(Exception):
-    pass
+    """Its message reaches the screen (the Add form's stop hint, Analyze), and Alpha Vantage's
+    own rate-limit text quotes the API key back, as does a requests error's URL. So the key
+    is masked here, once, rather than at every raise (2026-11-09: seen on the Add form)."""
+
+    def __init__(self, message: str = ""):
+        message = str(message)
+        if ALPHA_VANTAGE_API_KEY:
+            message = message.replace(ALPHA_VANTAGE_API_KEY, "[your key]")
+        super().__init__(message)
 
 
 # The free key refuses bursts faster than about one call a second, and the web server answers
