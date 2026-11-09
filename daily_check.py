@@ -1,10 +1,12 @@
 import copy
 import json
+import re
 import socket
 import time
 from datetime import date, datetime
 from pathlib import Path
 
+import insiders
 import main
 import notifier
 import prices
@@ -197,6 +199,74 @@ def checkpoint_emails() -> None:
         CHECKPOINTS_FILE.write_text(json.dumps(checkpoints, indent=2, ensure_ascii=False))
 
 
+WATCH_FILE = Path(__file__).parent / "data" / "early_warning.json"
+NEWS_DAYS = 3  # covers a missed day or a weekend; `seen` stops repeats
+
+
+def _early_filings(ticker: str, w: dict) -> list:
+    out = []
+    for f in insiders.early_sale_filings(ticker, w["since"]):
+        if f["form"].startswith("SC TO"):
+            text = f"an offer to buy shares ({f['form']}), usually from a buyer wanting the company."
+        else:
+            text = (f"a registration to sell shares ({f['form']}). A big holder needs one before it can sell "
+                    "a block quickly. It can also be for the company's own shares or bonds; the first page says whose.")
+        out.append({"id": f["id"], "lines": [f"SEC, {eu_date(f['filed'])}: {text}", f"  {f['url']}"]})
+    return out
+
+
+def _early_news(ticker: str, w: dict) -> list:
+    if not w.get("news_terms"):
+        return []
+    today = date.today()
+    rows = prices._finnhub_get("company-news", {
+        "symbol": ticker, "from": date.fromordinal(today.toordinal() - NEWS_DAYS).isoformat(), "to": today.isoformat(),
+    }) or []
+    terms = re.compile("|".join(w["news_terms"]), re.I)
+    out = []
+    for r in rows:
+        if not terms.search(f"{r.get('headline', '')} {r.get('summary', '')}"):
+            continue
+        day = eu_date(date.fromtimestamp(r["datetime"]).isoformat())
+        out.append({"id": f"news:{r.get('id') or r.get('url')}",
+                    "lines": [f"News, {day} ({r.get('source')}): {r.get('headline')}", f"  {r.get('url')}"]})
+    return out
+
+
+def early_warning_emails() -> None:
+    """Early signs that a big holder may sell, for stocks she chose (2026-11-09: a holding
+    whose parent company owns most of its shares). A block sale itself is secret until the evening it is done and lands
+    before the market opens, so nothing can warn of the sale; what can be known earlier is that
+    it is becoming likely: a registration to sell (SEC) or press reports of sale talks, a buyer
+    or a spin-off (Finnhub headlines matching her `news_terms`). Her list, in data/ (which stocks
+    she holds is personal): {ticker: {since, note, news_terms, seen}}. One email per stock, marked
+    seen only after it went out; one stock or source failing never stops the rest."""
+    if not WATCH_FILE.exists():
+        return
+    watch = json.loads(WATCH_FILE.read_text())
+    changed = False
+    for ticker, w in watch.items():
+        found = []
+        for source in (_early_filings, _early_news):
+            try:
+                found += [x for x in source(ticker, w) if x["id"] not in w.get("seen", [])]
+            except Exception as e:
+                print(f"early warning {ticker} {source.__name__} skipped: {e}")
+        if not found:
+            continue
+        lines = [f"An early sign for {ticker}, one you asked to be told about.", ""]
+        if w.get("note"):
+            lines += [f"Your note: {w['note']}", ""]
+        for x in found:
+            lines += x["lines"] + [""]
+        lines.append("Nothing has been sold yet because of this. Compare it with your note before deciding.")
+        if send_email_with_retry(f"{ticker}: an early sign you are watching for", "\n".join(lines)):
+            w.setdefault("seen", []).extend(x["id"] for x in found)
+            changed = True
+    if changed:
+        WATCH_FILE.write_text(json.dumps(watch, indent=2, ensure_ascii=False))
+
+
 def run() -> bool:
     """The whole check. Returns False only when the email could not be sent, so the caller
     tries the day again."""
@@ -281,6 +351,12 @@ def run() -> bool:
         checkpoint_emails()
     except Exception as e:
         print(f"checkpoint reminder skipped: {e}")
+
+    # Same rule: its own email, never at the stop check's expense.
+    try:
+        early_warning_emails()
+    except Exception as e:
+        print(f"early warning skipped: {e}")
 
     if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")

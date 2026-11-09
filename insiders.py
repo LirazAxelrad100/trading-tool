@@ -45,6 +45,10 @@ WINDOW_DAYS = 365
 MAX_FILINGS = 150  # a very active company files hundreds; the newest year is what matters
 PAUSE_SECONDS = 0.15
 PARSE_VERSION = 2  # bump when parse_form4() learns a field, so cached filings are re-read
+# Filings that come *before* shares are sold: a registration (a big holder can't sell a block
+# quickly without one) or a tender offer. The sale prospectus (424B) and the holder's own trade
+# report (Form 4) only arrive once the block is sold, too late to act on, so they are left out.
+EARLY_SALE_FORMS = ("S-1", "S-3", "SC TO")
 PAY_DAYS = 3  # a sale this soon after an exercise is the exercise being cashed in
 
 
@@ -171,6 +175,29 @@ def _form4(cik: int, filing: dict, cache: dict) -> Optional[dict]:
         except (InsiderError, ET.ParseError):
             return None  # one unreadable filing should not cost the whole summary
     return cache[key]
+
+
+def early_sale_filings(ticker: str, since: str) -> list:
+    """Filings since `since` (ISO date) that come before a big holder sells (EARLY_SALE_FORMS).
+    Fetched fresh (one request): the daily check reads this, and a day-old list could miss the
+    filing it exists to catch. Came from a holding (2026-11-09) whose parent company owns most of
+    its shares, where selling blocks would push the price down. A registration can also be for the company's own
+    shares or bonds; the email says so."""
+    cik = _cik(ticker)
+    if not cik:
+        raise InsiderError(f"{ticker}: not found among SEC filers")
+    recent = _get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json").json()["filings"]["recent"]
+    out = []
+    for i, form in enumerate(recent["form"]):
+        filed = recent["filingDate"][i]
+        if filed < since or not form.startswith(EARLY_SALE_FORMS):
+            continue
+        acc = recent["accessionNumber"][i]
+        out.append({
+            "id": acc, "form": form, "filed": filed,
+            "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{acc}-index.htm",
+        })
+    return out
 
 
 def summary(ticker: str) -> dict:
