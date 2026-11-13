@@ -264,6 +264,11 @@ def overlay_growth(ticker: str) -> dict:
     return {
         "growth_next_year_pct": entry.get("growth_next_year_pct"),
         "growth_this_year_pct": entry.get("growth_this_year_pct"),
+        # The two estimates the next-year % is computed from. Shown beside it because "fall
+        # 28,4% next year" left her asking "from what?" — the base is this year's estimate,
+        # which for DK and VLO is itself a spike (×3 and ×5,5 on 2025).
+        "this_fy_est": entry.get("this_fy_est"),
+        "next_fy_est": entry.get("next_fy_est"),
         "next_report_date": entry.get("next_report_date"),
         # The day this estimate was exported. It only moves when the user exports again, so
         # a screen that states it lets an old forecast read as old instead of as current.

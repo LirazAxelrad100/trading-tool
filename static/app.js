@@ -2286,14 +2286,26 @@ const holdingStatus = {};
 // facts joined by " · ", never one sentence: an earlier version glued next year's profit onto
 // the stop sentence and the two read as connected. Only next year — one number keeps a quiet
 // status quiet; silent when the ticker isn't in a Zacks Growth export.
+// "Profit expected to fall 28,4% next year" left her asking "from what?", and on DK and VLO
+// the answer matters: the base is this year's estimate, itself a spike. So both estimates are
+// stated and the % names what it compares. Zacks' figures are in the listing's currency (USD).
+// Without a % (a base at or below zero), the two numbers still say what is expected.
+function profitPerShareText(result) {
+  const a = result.this_fy_est, b = result.next_fy_est, g = result.growth_next_year_pct;
+  if (a == null || b == null) return "";
+  const usd = (v) => `$${fmt(v)}`;
+  const change = g == null ? "" : `, which is a ${g >= 0 ? "rise" : "fall"} of ${fmtPct(Math.abs(g) / 100)}`;
+  return `profit per share expected: ${usd(a)} this year → ${usd(b)} next year${change}`;
+}
+
 function attachStatusLine(tr, result) {
   tr.nextElementSibling?.classList.contains("status-line") && tr.nextElementSibling.remove();
   const dayWord = result.day_change_pct >= 0 ? "up" : "down";
   const parts = [];
   if (result.day_change_pct != null) parts.push(`${dayWord} ${fmtPct(Math.abs(result.day_change_pct))} today`);
   parts.push(`${fmtPct(result.pct_above_stop)} above stop loss`);
-  const g = result.growth_next_year_pct;
-  if (g != null) parts.push(`analysts expect profit to ${g >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(g) / 100)} next year`);
+  const profit = profitPerShareText(result);
+  if (profit) parts.push(profit);
   const sub = document.createElement("tr");
   sub.className = "status-line";
   const td = document.createElement("td");
@@ -2363,7 +2375,7 @@ function renderFlag(id, result) {
           : "exactly at the stop"
       }</div>
       <div class="line">Estimated ${gainWord}: ${fmt(result.total_gain)} · Estimated tax (26,375%): ${fmt(result.estimated_tax)}</div>
-      ${result.growth_next_year_pct != null ? `<div class="line">Analysts expect profit to ${result.growth_next_year_pct >= 0 ? "grow" : "fall"} ${fmtPct(Math.abs(result.growth_next_year_pct) / 100)} next year${result.growth_as_of ? ` <span class="subtitle">(Zacks estimate as of ${fmtDate(result.growth_as_of)})</span>` : ""}.</div>` : ""}
+      ${profitPerShareText(result) ? `<div class="line">${(t => t[0].toUpperCase() + t.slice(1))(profitPerShareText(result))}${result.growth_as_of ? ` <span class="subtitle">(Zacks estimate as of ${fmtDate(result.growth_as_of)})</span>` : ""}.</div>` : ""}
       ${consensusLine}
       <div class="line subtitle questions-label">Before acting:</div>
       <ol class="stop-questions">

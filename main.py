@@ -1203,6 +1203,8 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
         # None when the ticker is not in a Zacks Growth export yet — the line is dropped
         # rather than shown empty, since a stop status should stay short.
         "growth_next_year_pct": growth.get("growth_next_year_pct"),
+        "this_fy_est": growth.get("this_fy_est"),
+        "next_fy_est": growth.get("next_fy_est"),
         "growth_as_of": growth.get("growth_as_of"),
     }
     if triggered:
