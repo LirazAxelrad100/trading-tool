@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """You read numbers from screenshots of the Trade Republic app f
 Copy what is printed; never work a number out. If a field is not visible or too blurred to be sure of, give it 0 (or "" for text) and add its name to `unreadable`, written like "sale.total" or "cash.available". If an image is not the screen its label says, list all its fields in `unreadable` and describe the problem in `problems`. The app writes numbers the European way (1.234,56 means 1234.56); return plain JSON numbers.
 
 Fields:
-- sale / buy: `asset` is the company name. `shares` and `price` come from the Transaction row ("7,3 × 265,00 €"). `fee` is the Fee row. `total` is the row labelled Total, not the heading. `date` is YYYY-MM-DD and `time` is HH:MM, from the line under the heading; "Today" and "Yesterday" count from the date in the message, and a date with no year is in that date's year, or the year before if it would otherwise be in the future.
+- sale / buy: `asset` is the company name. `shares` and `price` come from the Transaction row ("7,3 × 265,00 €"). `fee` is the Fee row. `total` is the row labelled Total, not the heading. `date` is YYYY-MM-DD and `time` is HH:MM, from the line under the heading; "Today" and "Yesterday" count from the day that image was taken when the message gives it (the screen may be uploaded a day later), otherwise from today's date in the message, and a date with no year is in that date's year, or the year before if it would otherwise be in the future.
 - sale_tax: `gross_gain` is the Gross gain row, or the Gross loss row as a negative number. `pot_stocks_used`, `pot_other_used` and `exemption_used` are the positive sizes of those rows under Tax base; use 0 for a row that isn't there. Offset pots rows lower down are not used. `tax_base` is the Total under Tax base, and `tax_paid` is the Total under Taxes.
 - cash: `available` is the Available figure. `top_name`, `top_amount` and `top_date` describe the first row under Transactions, with a minus for money that went out.
 - tax_overview: "Exemption order X / Y" shows X filed and Y left; `allowance_left` is Y. `pot_stocks` and `pot_other` are the Loss pot rows.
@@ -102,8 +102,11 @@ class ReadFailed(Exception):
     """A plain sentence for the screen. Never carries the key or the image."""
 
 
-def read(images: dict, today: str, client: Optional[Anthropic] = None) -> dict:
-    """`images` is {slot: (media_type, base64 string)}, with slot from SLOTS."""
+def read(images: dict, today: str, client: Optional[Anthropic] = None, taken: Optional[dict] = None) -> dict:
+    """`images` is {slot: (media_type, base64 string)}, with slot from SLOTS. `taken` is
+    {slot: YYYY-MM-DD}, the day each screenshot was taken, from the file's own date: a screen
+    saying "Today" and uploaded the next morning means the day it was taken (TTWO, 13.11)."""
+    taken = taken or {}
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if client is None and not api_key:
         raise ReadFailed("The Anthropic API key isn't set, so the screens can't be read. You can type the numbers.")
@@ -111,7 +114,8 @@ def read(images: dict, today: str, client: Optional[Anthropic] = None) -> dict:
 
     content = [{"type": "text", "text": f"Today is {today}."}]
     for slot, (media_type, data) in images.items():
-        content.append({"type": "text", "text": f"Image `{slot}`: {SLOTS[slot]}."})
+        when = f" Taken on {taken[slot]}." if taken.get(slot) else ""
+        content.append({"type": "text", "text": f"Image `{slot}`: {SLOTS[slot]}.{when}"})
         content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
     content.append({"type": "text", "text": "Return the fields for these images."})
 

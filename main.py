@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1699,6 +1699,23 @@ def put_tax_settings(broker: str, body: BankTaxIn):
 MAX_SCREEN_BYTES = 5 * 1024 * 1024
 
 
+def _taken_dates(raw: Optional[str], images: dict) -> dict:
+    """The day each screenshot was taken, sent by the browser from the file's date. Only plain
+    dates no later than today are kept; anything else is ignored rather than refused."""
+    try:
+        sent = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    out = {}
+    for slot, day in (sent.items() if isinstance(sent, dict) else []):
+        try:
+            if slot in images and date.fromisoformat(day) <= date.today():
+                out[slot] = day
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 @app.post("/api/screens/read")
 def read_screens(
     sale: Optional[UploadFile] = File(None),
@@ -1706,6 +1723,7 @@ def read_screens(
     buy: Optional[UploadFile] = File(None),
     cash: Optional[UploadFile] = File(None),
     tax_overview: Optional[UploadFile] = File(None),
+    taken: Optional[str] = Form(None),
 ):
     """Reads the dropped screens into numbers for the form. Saves nothing and keeps no image."""
     files = {"sale": sale, "sale_tax": sale_tax, "buy": buy, "cash": cash, "tax_overview": tax_overview}
@@ -1722,7 +1740,7 @@ def read_screens(
     if not images:
         raise HTTPException(status_code=422, detail="Add at least one screen.")
     try:
-        return screens.read(images, date.today().isoformat())
+        return screens.read(images, date.today().isoformat(), taken=_taken_dates(taken, images))
     except screens.ReadFailed as e:
         raise HTTPException(status_code=502, detail=str(e))
 

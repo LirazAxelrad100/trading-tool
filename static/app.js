@@ -2011,7 +2011,7 @@ async function addHolding() {
     alert("The cash amount isn't a number. For example: 1.234,56");
     return;
   }
-  const buyWarnings = buyChecks(buyInputs("add")).filter((c) => !c.ok).map((c) => c.text);
+  const buyWarnings = buyChecks(buyInputs("add")).filter(stopsConfirm).map((c) => c.text);
   if (buyWarnings.length && !confirm(`${buyWarnings.join("\n\n")}\n\nAdd the purchase anyway?`)) return;
 
   const payload = { ticker, shares, cost_basis, purchase_date, stop_price, exit_plan, broker };
@@ -3464,13 +3464,14 @@ function renderReadButton(panelId) {
   const box = document.getElementById(`${panelId}-read`);
   if (screensReadThemselves(state.kind)) return;
   const cutAdded = SCREEN_SLOTS[state.kind].some((s) => s.cut && state.blobs[s.key]);
-  box.innerHTML = `<button class="secondary" onclick="readScreens('${panelId}')">${
-    cutAdded ? "Tax ID not showing? Read the screens" : "Read the screens"
-  }</button>`;
+  // A plain button with the check as its own line: worded as a question, the button was missed.
+  box.innerHTML =
+    (cutAdded ? `<div class="subtitle">Check your tax ID isn't showing in the Tax overview above.</div>` : "") +
+    `<button onclick="readScreens('${panelId}')">Read the screens</button>`;
 }
 
 function mountScreens(panelId, kind, onRead) {
-  screenState[panelId] = { kind, blobs: {}, read: null, onRead, readToken: 0 };
+  screenState[panelId] = { kind, blobs: {}, taken: {}, read: null, onRead, readToken: 0 };
   const intro = screensReadThemselves(kind)
     ? "Add these screens from Trade Republic. They're read as soon as all of them are in."
     : "Add these screens from Trade Republic, then press Read.";
@@ -3513,12 +3514,19 @@ async function pickScreen(panelId, key, input) {
   const slot = SCREEN_SLOTS[state.kind].find((s) => s.key === key);
   const note = document.getElementById(`${panelId}-${key}-note`);
   delete state.blobs[key];
+  delete state.taken[key];
   note.innerHTML = "";
   const file = input.files[0];
   if (file) {
     try {
       const blob = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
       state.blobs[key] = blob;
+      // The file keeps the moment the screenshot was taken, so a screen saying "Today" and
+      // uploaded the next morning is dated the day it was taken (TTWO, 13.11). Local date parts.
+      if (file.lastModified) {
+        const d = new Date(file.lastModified);
+        state.taken[key] = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
       note.innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="" />${
         slot.cut ? `<div class="subtitle">Top cut off. Check your tax ID isn't showing.</div>` : ""
       }`;
@@ -3555,6 +3563,7 @@ async function readScreens(panelId) {
   }
   const form = new FormData();
   keys.forEach((k) => form.append(k, state.blobs[k], `${k}.jpg`));
+  form.append("taken", JSON.stringify(state.taken));
   status.innerHTML = `<div class="subtitle">Reading…</div>`;
   // A slower reply for screens since replaced, or for a window since reopened, must not fill the form.
   const token = ++state.readToken;
@@ -3599,6 +3608,10 @@ const near = (a, b, within) => Math.abs(a - b) <= within;
 const has = (n) => n !== null && n !== undefined && !isNaN(n);
 const SALE_GAIN_TOLERANCE = 5; // purchase fees: the bank counts them as cost, older lots here don't
 const SCREEN_CENTS_TOLERANCE = 1;
+// Only a disagreement inside the trade itself asks again on Confirm. Cash, pots and the ISIN
+// stay a line on the form: they have ordinary explanations, and a popup repeating a line the
+// form already shows was the "so many warnings" complaint (TTWO, 14.11).
+const stopsConfirm = (c) => !c.ok && !c.soft;
 
 // Every number on the form checked against the others, so a typing slip or a misread digit
 // shows up before it is saved. Real case: NBIS was recorded after tax, and nothing noticed for
@@ -3655,7 +3668,7 @@ function saleChecks(i) {
     out.push(
       near(expected, i.cashNow, SCREEN_CENTS_TOLERANCE)
         ? { ok: true, text: `Cash matches: ${fmt(i.before.cash)} plus the money received is ${fmt(i.cashNow)}.` }
-        : { ok: false, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A dividend, interest, a tax correction or an unrecorded trade could explain it.` }
+        : { ok: false, soft: true, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A dividend, interest, a tax correction or an unrecorded trade could explain it. The screen's figure is saved.` }
     );
   }
 
@@ -3668,7 +3681,7 @@ function saleChecks(i) {
     const was = (old.allowance_left || 0) + (old.share_loss_pot || 0) + (old.other_loss_pot || 0);
     const now = i.allowance + i.pot + i.other;
     if (!near(was - usedRead, now, SCREEN_CENTS_TOLERANCE)) {
-      out.push({ ok: false, text: `Losses and allowance: the tool expected ${fmt(was - usedRead)} left, and the screen shows ${fmt(now)}. After a tax correction this screen can be behind, so check it again later.` });
+      out.push({ ok: false, soft: true, text: `Losses and allowance: the tool expected ${fmt(was - usedRead)} left, and the screen shows ${fmt(now)}. After a tax correction this screen can be behind, so check it again later.` });
     }
   }
   return out;
@@ -3683,7 +3696,7 @@ const NO_ISIN_TEXT =
 function buyChecks(i) {
   const out = [];
   const read = i.read || {};
-  if (i.isinMissing) out.push({ ok: false, text: NO_ISIN_TEXT });
+  if (i.isinMissing) out.push({ ok: false, soft: true, text: NO_ISIN_TEXT });
   if (i.h && read.buy && read.buy.asset && !sameCompany(read.buy.asset, i.h)) {
     out.push({ ok: false, text: `This screen is for ${read.buy.asset}, but you're adding to ${i.h.ticker}.` });
   }
@@ -3695,7 +3708,7 @@ function buyChecks(i) {
     out.push(
       near(expected, i.cashNow, SCREEN_CENTS_TOLERANCE)
         ? { ok: true, text: `Cash matches: ${fmt(i.before.cash)} minus ${fmt(i.spent)} is ${fmt(i.cashNow)}.` }
-        : { ok: false, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A deposit, a dividend, interest or an unrecorded trade could explain it.` }
+        : { ok: false, soft: true, text: `The tool expected ${fmt(expected)} of cash, and the screen shows ${fmt(i.cashNow)}. A deposit, a dividend, interest or an unrecorded trade could explain it. The screen's figure is saved.` }
     );
   }
   return out;
@@ -4310,7 +4323,7 @@ async function submitAddLot() {
     alert("The cash amount isn't a number. For example: 1.234,56");
     return;
   }
-  const buyWarnings = buyChecks(buyInputs("lot")).filter((c) => !c.ok).map((c) => c.text);
+  const buyWarnings = buyChecks(buyInputs("lot")).filter(stopsConfirm).map((c) => c.text);
   if (buyWarnings.length && !confirm(`${buyWarnings.join("\n\n")}\n\nAdd the purchase anyway?`)) return;
   const res = await fetch(`${API}/${lotsHoldingId}/lots`, {
     method: "POST",
@@ -4490,7 +4503,7 @@ async function submitSell(overridePriceCheck = false) {
   }
 
   if (!overridePriceCheck) {
-    const warnings = saleChecks(i).filter((c) => !c.ok).map((c) => c.text);
+    const warnings = saleChecks(i).filter(stopsConfirm).map((c) => c.text);
     if (i.gain === null) warnings.push("The gross gain or loss is empty, so the tool can't check this sale against your bank.");
     if (warnings.length && !confirm(`${warnings.join("\n\n")}\n\nRecord the sale anyway?`)) return;
   }
