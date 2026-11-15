@@ -223,9 +223,14 @@ def _early_news(ticker: str, w: dict) -> list:
         "symbol": ticker, "from": date.fromordinal(today.toordinal() - NEWS_DAYS).isoformat(), "to": today.isoformat(),
     }) or []
     terms = re.compile("|".join(w["news_terms"]), re.I)
+    # Headlines that match a term but are known noise, e.g. the automatic "Fund X decreases stake
+    # in Y" lines written from every quarterly 13F (Icahn's BLCO trim, 13.11.2026). Headline only.
+    ignore = re.compile("|".join(w["ignore_terms"]), re.I) if w.get("ignore_terms") else None
     out = []
     for r in rows:
         if not terms.search(f"{r.get('headline', '')} {r.get('summary', '')}"):
+            continue
+        if ignore and ignore.search(r.get("headline", "")):
             continue
         day = eu_date(date.fromtimestamp(r["datetime"]).isoformat())
         out.append({"id": f"news:{r.get('id') or r.get('url')}",
