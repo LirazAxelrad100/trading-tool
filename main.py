@@ -926,6 +926,13 @@ def watchlist_against_rules():
     holdings = load_holdings()
     active = active_only(holdings)
     active_total = sum(h["shares"] * h["current_price"] for h in active)
+    # Her target is a share of "my money": holdings plus uninvested cash. Without the cash
+    # the amount shrinks right after a sale, exactly when she is deciding where it goes.
+    try:
+        cash_eur = max(0.0, cash_now().get("amount") or 0.0)
+    except Exception:
+        cash_eur = 0.0
+    money_total = active_total + cash_eur
     history, sales = load_holdings_history(), load_sales_history()
     watch_history = load_watchlist_history()
 
@@ -939,7 +946,7 @@ def watchlist_against_rules():
         vol = risk.level_from_cache(ticker)
         if vol:
             width = vol["width"]
-            by_target = active_total * rules["target_pct"] / 100
+            by_target = money_total * rules["target_pct"] / 100
             by_risk = rules["max_stop_loss_eur"] / (width / 100)
             amount = max(rules["min_eur"], min(by_target, by_risk))
             row.update({
@@ -948,38 +955,40 @@ def watchlist_against_rules():
                 "limited_by": "minimum" if amount == rules["min_eur"]
                 else "risk" if by_risk < by_target else "target",
                 "stop_loss_eur": amount * width / 100,
-                "pct_of_portfolio": amount / active_total * 100 if active_total else None,
+                "pct_of_portfolio": amount / money_total * 100 if money_total else None,
             })
-        if bloc:
-            # Both series are tried and the longer comparison kept. The recorded one is only
-            # ~12 days for most tickers, and on those it put a pharma supplier (WST) and an
-            # oilfield-equipment maker (FET) in the AI bloc; the cached closes, a month or more,
-            # put PBF with VLO and DK and SKHY with MU instead — what they actually are.
-            cached = [{"date": d, "ticker": ticker, "price": p}
-                      for d, p in alpha_vantage.cached_closes(ticker).items()]
-            best = {}
-            for series in (cached, watch_history):
-                try:
-                    cmp = concentration.compare_candidate(
-                        ticker, active, history, sales, watchlist_history=series, cached_only=True,
-                    )
-                except AlphaVantageError:
-                    continue
-                if cmp.get("pairs") and (cmp.get("days") or 0) > (best.get("days") or 0):
-                    best = cmp
-            if (best.get("days") or 0) >= MIN_RULE_DAYS:
-                top = best["pairs"][0]
-                row["bloc_closest"] = top
-                row["bloc_days"] = best["days"]
-                row["bloc"] = (
-                    "joins" if best.get("joins_group") == bloc["tickers"]
-                    else "moves_with" if top["correlation"] >= concentration.CORRELATION_THRESHOLD
-                    else "leans" if top["correlation"] >= 0.35
-                    else "own"
+        # Run even with no bloc: "does it move with something I own?" still has an answer
+        # when her holdings move independently of each other. Gating it on a bloc made every
+        # row read "not enough data" the day the last bloc dissolved (19.11.2026).
+        # Both series are tried and the longer comparison kept. The recorded one is only
+        # ~12 days for most tickers, and on those it put a pharma supplier (WST) and an
+        # oilfield-equipment maker (FET) in the AI bloc; the cached closes, a month or more,
+        # put PBF with VLO and DK and SKHY with MU instead — what they actually are.
+        cached = [{"date": d, "ticker": ticker, "price": p}
+                  for d, p in alpha_vantage.cached_closes(ticker).items()]
+        best = {}
+        for series in (cached, watch_history):
+            try:
+                cmp = concentration.compare_candidate(
+                    ticker, active, history, sales, watchlist_history=series, cached_only=True,
                 )
-            elif best:
-                row["bloc"] = "too_few_days"
-                row["bloc_days"] = best["days"]
+            except AlphaVantageError:
+                continue
+            if cmp.get("pairs") and (cmp.get("days") or 0) > (best.get("days") or 0):
+                best = cmp
+        if (best.get("days") or 0) >= MIN_RULE_DAYS:
+            top = best["pairs"][0]
+            row["bloc_closest"] = top
+            row["bloc_days"] = best["days"]
+            row["bloc"] = (
+                "joins" if bloc and best.get("joins_group") == bloc["tickers"]
+                else "moves_with" if top["correlation"] >= concentration.CORRELATION_THRESHOLD
+                else "leans" if top["correlation"] >= 0.35
+                else "own"
+            )
+        elif best:
+            row["bloc"] = "too_few_days"
+            row["bloc_days"] = best["days"]
         rows.append(row)
     # The winners' rule: no automatic cap, but a holding past the review line is named.
     review = [
@@ -988,7 +997,8 @@ def watchlist_against_rules():
         if active_total and h["shares"] * h["current_price"] / active_total * 100 >= rules.get("review_pct", 100)
     ]
     review.sort(key=lambda r: -r["pct"])
-    return {"rules": rules, "active_total": active_total, "bloc": bloc, "rows": rows, "review": review}
+    return {"rules": rules, "active_total": active_total, "cash": cash_eur, "money_total": money_total,
+            "bloc": bloc, "rows": rows, "review": review, "min_days": MIN_RULE_DAYS}
 
 
 @app.post("/api/watchlist")

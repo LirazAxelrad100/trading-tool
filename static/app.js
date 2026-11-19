@@ -2884,9 +2884,11 @@ function renderWatchRules(d) {
         .join(", ")} is past your ${r.review_pct}% review line.`
     : "";
   host.innerHTML = `<p class="subtitle"><strong>Your rules:</strong> about ${r.target_pct}% per stock (${ruleEur(
-    (d.active_total * r.target_pct) / 100
-  )} today), less for wild stocks, so a stop loss never loses more than ${ruleEur(r.max_stop_loss_eur)}.${
-    d.bloc ? ` No new AI companies. Your AI stocks (${escapeHtml(d.bloc.tickers.join(" · "))}) move together, and the line under each ticker says if it moves with them.` : ""
+    ((d.money_total ?? d.active_total) * r.target_pct) / 100
+  )} today, ${r.target_pct}% of your holdings plus cash), less for wild stocks, so a stop loss never loses more than ${ruleEur(r.max_stop_loss_eur)}.${
+    d.bloc
+      ? ` No new AI companies. Your AI stocks (${escapeHtml(d.bloc.tickers.join(" · "))}) move together, and the line under each ticker says if it moves with them.`
+      : " No new AI companies. The line under each ticker says if its price moves with something you own."
   }${review}${
     missing.length
       ? ` <button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ${missing.length} without enough data (${missing.length} of your 25 daily price lookups).`
@@ -2911,7 +2913,7 @@ function watchRuleLine(row) {
       `<span class="price-down" title="Before tax. A loss goes into your loss pot and lowers the tax on later profits, so it costs you about a quarter less in the end. A gap overnight can sell below the stop loss.">−${ruleEur(row.stop_loss_eur)}</span> if it fires`
     );
   } else {
-    parts.push(`Your rules: <span class="subtitle">not enough data yet</span>`);
+    parts.push(`Your rules: <span class="subtitle">not checked yet (Check above)</span>`);
   }
   // How the price moves, never what the company does. The tool can't tell an AI company
   // from one that only trades like them — KEYS is not AI, yet moves with the AI stocks — so
@@ -2921,8 +2923,13 @@ function watchRuleLine(row) {
   if (row.bloc === "joins")
     parts.push(`<span class="sig-mid" title="Its price has moved with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days, so on a bad day for your AI stocks it would likely fall with them — whatever the company does.">moves with your AI stocks</span>`);
   else if (row.bloc === "moves_with") parts.push(`moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
-  else if (row.bloc === "leans" || row.bloc === "own") parts.push("moves on its own");
-  else if (row.level) parts.push(`<span class="subtitle">how it moves: not enough data yet</span>`);
+  else if (row.bloc === "leans")
+    parts.push(`<span title="Price link ${fmt(row.bloc_closest.correlation)} over ${row.bloc_days} days, just under the ${fmt(0.5)} bar. Not one position, but not independent either.">leans towards ${escapeHtml(row.bloc_closest.ticker)}, which you own</span>`);
+  else if (row.bloc === "own")
+    parts.push(`<span title="Closest: ${escapeHtml(row.bloc_closest.ticker)}, price link ${fmt(row.bloc_closest.correlation)} over ${row.bloc_days} days. Measured against what you own today.">moves on its own</span>`);
+  else if (row.bloc === "too_few_days")
+    parts.push(`<span class="subtitle">how it moves: ${row.bloc_days} of ${watchRules.min_days || 20} days so far</span>`);
+  else if (row.level) parts.push(`<span class="subtitle">how it moves: not checked yet (Check above)</span>`);
   return parts.join(" · ");
 }
 
