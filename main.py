@@ -943,7 +943,9 @@ def watchlist_against_rules():
     for it in load_watchlist():
         ticker = it["ticker"]
         row = {"ticker": ticker}
-        vol = risk.level_from_cache(ticker)
+        ls_closes = ls_closes_for(ticker, it.get("current_price"))
+        vol = risk.level_from_cache(ticker, closes_by_date=ls_closes) if len(ls_closes) >= 40 else None
+        vol = vol or risk.level_from_cache(ticker)
         if vol:
             width = vol["width"]
             by_target = money_total * rules["target_pct"] / 100
@@ -966,8 +968,10 @@ def watchlist_against_rules():
         # put PBF with VLO and DK and SKHY with MU instead — what they actually are.
         cached = [{"date": d, "ticker": ticker, "price": p}
                   for d, p in alpha_vantage.cached_closes(ticker).items()]
+        # L&S closes are EUR, like the recorded holding values, so no currency leaks in.
+        ls_series = [{"date": d, "ticker": ticker, "price": p} for d, p in ls_closes.items()]
         best = {}
-        for series in (cached, watch_history):
+        for series in (ls_series, cached, watch_history):
             try:
                 cmp = concentration.compare_candidate(
                     ticker, active, history, sales, watchlist_history=series, cached_only=True,
@@ -1838,6 +1842,38 @@ def get_stop_history(ticker: str, cached_only: bool = False):
         return risk.stop_history(ticker.upper(), cached_only=cached_only)
     except AlphaVantageError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+_isin_misses = {}  # ticker -> day a lookup found nothing, so a page load doesn't search again
+
+
+def ls_closes_for(ticker: str, expected_eur: Optional[float] = None) -> dict:
+    """Lang & Schwarz daily EUR closes for any ticker (ls_tc.daily_closes), or {}. The ISIN
+    comes from a holding, else the lookup cache, else one lookup (free: Finnhub + L&S search).
+    Replaced the watch list's Check button for most tickers (2026-11-24): Alpha Vantage's
+    25 calls a day ran out before the button could fill the rules line.
+
+    A looked-up ISIN is checked again against `expected_eur` (the watch item's price): the
+    lookup's own price check is one moment, and AGL (agilon health) once matched Agilysys,
+    whose price happened to sit within 6% that day. Holdings' ISINs are hers, so not checked."""
+    ticker = ticker.strip().upper()
+    isin = next((h.get("isin") for h in load_holdings() if h.get("ticker") == ticker and h.get("isin")), None)
+    looked_up = not isin
+    if not isin and ls_tc.LOOKUP_CACHE_FILE.exists():
+        isin = (json.loads(ls_tc.LOOKUP_CACHE_FILE.read_text()).get(ticker) or {}).get("isin")
+    if not isin and _isin_misses.get(ticker) != date.today().isoformat():
+        try:
+            isin = isin_lookup(ticker).get("isin")
+        except Exception:
+            isin = None
+        if not isin:
+            _isin_misses[ticker] = date.today().isoformat()
+    closes = ls_tc.daily_closes(isin) if isin else {}
+    if closes and looked_up and expected_eur:
+        last = closes[max(closes)]
+        if abs(last / expected_eur - 1) > 0.15:  # a day's move plus FX, far short of a wrong company
+            return {}
+    return closes
 
 
 @app.get("/api/isin-lookup/{ticker}")

@@ -236,3 +236,54 @@ def find_isin(ticker: str, company: str, expected_eur: float) -> Optional[dict]:
             LOOKUP_CACHE_FILE.write_text(json.dumps(cache, indent=2, ensure_ascii=False))
             return found
     return None
+
+
+HISTORY_CACHE_FILE = DATA_DIR / "ls_tc_history_cache.json"
+HISTORY_KEEP_DAYS = 260  # about a year of weekdays: enough for a 90-day window and then some
+
+
+def daily_closes(isin: str) -> dict:
+    """{date: EUR close} for each weekday, from L&S's own chart history. Free and with no daily
+    cap, unlike Alpha Vantage's 25 calls, so the watch list can read every ticker on load.
+    Closes only: L&S serves no daily low, so a stop's intraday trigger (risk.stop_history)
+    still needs Alpha Vantage. Weekend points are dropped (L&S quotes then, with no market
+    behind it), and so is today's point, which is the live price rather than a close.
+    Cached per ISIN per day. Returns {} on any failure, so callers fall back quietly."""
+    from datetime import date, datetime, timezone
+
+    isin = isin.strip().upper()
+    today = date.today().isoformat()
+    cache = json.loads(HISTORY_CACHE_FILE.read_text()) if HISTORY_CACHE_FILE.exists() else {}
+    hit = cache.get(isin)
+    if hit and hit.get("fetched_date") == today:
+        return hit["closes"]
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/_rpc/json/instrument/chart/dataForInstrument",
+            params={
+                "container": "chart1",
+                "instrumentId": resolve_instrument_id(isin),
+                "marketId": 1,
+                "quotetype": "mid",
+                "series": "history",
+                "type": "mini",
+                "localeId": 2,
+            },
+            headers=HEADERS,
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+        points = ((resp.json().get("series") or {}).get("history") or {}).get("data") or []
+    except (requests.RequestException, ValueError, LsTcError):
+        return hit["closes"] if hit else {}
+    closes = {}
+    for ms, price in points:
+        day = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date()
+        if day.weekday() < 5 and day.isoformat() < today and price:
+            closes[day.isoformat()] = price
+    closes = dict(sorted(closes.items())[-HISTORY_KEEP_DAYS:])
+    cache[isin] = {"fetched_date": today, "closes": closes}
+    tmp = HISTORY_CACHE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cache))
+    tmp.replace(HISTORY_CACHE_FILE)  # atomic: page loads can read several tickers at once
+    return closes

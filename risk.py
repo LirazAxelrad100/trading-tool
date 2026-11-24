@@ -114,12 +114,14 @@ def stop_default(ticker: str) -> dict:
     }
 
 
-def level_from_cache(ticker: str, days: int = 90) -> Optional[dict]:
+def level_from_cache(ticker: str, days: int = 90, closes_by_date: Optional[dict] = None) -> Optional[dict]:
     """The volatility level from whatever closes are already cached, however old — never a
     call. A level moves slowly, so a few weeks' staleness doesn't change the band, and the
     watch list's rules panel reads fourteen tickers at once against a 25/day budget.
-    `as_of` is the cache's last close, shown so an old reading is visible."""
-    closes_by_date = alpha_vantage.cached_closes(ticker)
+    `as_of` is the cache's last close, shown so an old reading is visible. `closes_by_date`
+    lets the caller pass Lang & Schwarz's history instead (free, no cap)."""
+    if closes_by_date is None:
+        closes_by_date = alpha_vantage.cached_closes(ticker)
     dates = sorted(closes_by_date)[-days:]
     if len(dates) < 40:
         return None
