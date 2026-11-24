@@ -418,6 +418,9 @@ tr.has-rule-line td { border-bottom: none; padding-bottom: 0.15rem; }
 tr.watch-rule-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted); }
 
 /* A holding's plain status, one line under its row (attached to the row above). */
-tr.has-status-line td { border-bottom: none; padding-bottom: 0.15rem; }
-tr.status-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted); }
 .mini-table .mini-table-divider td { padding-top: 10px; }
+
+/* Holding row actions: four small buttons in two rows (2026-11-24), so the table has room
+   for Since purchase. Real buttons: as plain links they didn't read as clickable. */
+.row-links { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; white-space: nowrap; }
+.row-links button { padding: 0.2rem 0.5rem; font-size: 0.8rem; margin: 0; }

@@ -876,6 +876,8 @@ function renderConsensusModal(ticker, consensus, noDataHint) {
   body.innerHTML = `
     <div id="price-chart-container"><p class="empty">Loading chart…</p></div>
     ${consensusSection}
+    <p><button onclick="closeConsensusModal(); analyzeTicker('${escapeHtml(ticker)}')">Full analysis</button>
+    <span class="subtitle">signals, insiders and a written summary; takes a few seconds</span></p>
   `;
   modal.style.display = "flex";
   loadPriceChart("price-chart-container", ticker);
@@ -886,8 +888,14 @@ function showConsensus(id) {
   renderConsensusModal(
     h ? h.ticker : "",
     h ? h.consensus : null,
-    "No analyst consensus data yet — click Refresh on this holding first."
+    "No analyst consensus data yet — click Refresh all prices first."
   );
+}
+
+// Since purchase: today's price against the buy-in. No colour: Today % is the table's only
+// green/red figure (see the colour rule in CLAUDE.md), and the Total cell already colours the gain.
+function sincePurchaseText(h) {
+  return h.since_purchase_pct == null ? "—" : `${h.since_purchase_pct > 0 ? "+" : ""}${fmtPct(h.since_purchase_pct)}`;
 }
 
 function showConsensusByTicker(ticker) {
@@ -1595,7 +1603,10 @@ function updateSortArrows() {
 
 async function render() {
   const all = await fetchHoldings();
-  all.forEach((h) => (h.total = h.shares * h.current_price));
+  all.forEach((h) => {
+    h.total = h.shares * h.current_price;
+    h.since_purchase_pct = h.cost_basis ? h.current_price / h.cost_basis - 1 : null;
+  });
   lastHoldings = all;
   // Two groups, each measured against its own total, so the 5% minimum keeps meaning what it
   // meant before the old holdings arrived. See is_old() in main.py.
@@ -1645,15 +1656,20 @@ async function render() {
                <td><input id="e-cost-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.cost_basis)}" /></td>
                <td><input id="e-date-${h.id}" type="date" value="${h.purchase_date}" /></td>`
         }
-        <td><input id="e-stop-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.stop_price)}" oninput="updateTrailPreview('${h.id}')" /></td>
-        <td><input id="e-ref-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.reference_high)}" oninput="updateTrailPreview('${h.id}')" /></td>
-        <td id="e-trailcalc-${h.id}">${fmtPct(h.trailing_pct)}</td>
+        <td>
+          <label class="subtitle" style="display:block;">Stop loss</label>
+          <input id="e-stop-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.stop_price)}" oninput="updateTrailPreview('${h.id}')" />
+          <label class="subtitle" style="display:block; margin-top:0.25rem;">High it trails</label>
+          <input id="e-ref-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.reference_high)}" oninput="updateTrailPreview('${h.id}')" />
+          <span class="subtitle">below it: <span id="e-trailcalc-${h.id}">${fmtPct(h.trailing_pct)}</span></span>
+        </td>
         <td>
           <input id="e-price-${h.id}" type="text" inputmode="decimal" value="${toEuInput(h.current_price)}" />
           <label class="subtitle" style="display:block; margin-top:0.25rem;"><input type="checkbox" id="e-manual-${h.id}" ${h.manual_price ? "checked" : ""} /> manual price (don't auto-refresh)</label>
           <input id="e-isin-${h.id}" type="text" placeholder="ISIN (optional, for LS price)" value="${h.isin || ""}" style="display:block; margin-top:0.25rem; width:100%;" />
         </td>
         <td class="${dayChangeClass(h.day_change_pct)}">${fmtDayChangePct(h.day_change_pct)}</td>
+        <td>${sincePurchaseText(h)}</td>
         <td>${fmt(h.total)}</td>
         <td>${fmtPct(h.portfolio_pct)}</td>
         <td>${zacksCell(h)}</td>
@@ -1675,33 +1691,31 @@ async function render() {
       <td>${fmt(h.cost_basis)}</td>
       <td>${h.purchase_date}</td>
       <td>${fmt(h.stop_price)}</td>
-      <td>${fmt(h.reference_high)}</td>
-      <td>${fmtPct(h.trailing_pct)}</td>
       <td>${fmt(h.current_price)}${h.isin ? ' <span class="subtitle" title="Priced directly from Lang &amp; Schwarz via ISIN">(LS)</span>' : h.manual_price ? ' <span class="subtitle">(manual)</span>' : ""}</td>
       <td class="${dayChangeClass(h.day_change_pct)}">${!h.isin && h.manual_price ? "—" : fmtDayChangePct(h.day_change_pct)}</td>
+      <td>${sincePurchaseText(h)}</td>
       <td class="${gainClass(h)} total-cell" onclick="showUnrealized('${h.id}')">${fmt(h.total)}</td>
       <td>${fmtPct(h.portfolio_pct)}</td>
       <td>${zacksCell(h)}</td>
-      <td>
-        <button class="secondary" onclick="analyzeTicker('${h.ticker}')">Analyze</button>
-        ${!h.isin && h.manual_price ? '<span class="subtitle">manual price</span>' : `<button class="secondary" onclick="refreshHolding('${h.id}')">Refresh</button>`}
-        <button class="secondary" onclick="boughtMore('${h.id}')" title="Add a new purchase of this stock">Bought more</button>
+      <td><div class="row-links">
+        <button class="secondary" onclick="boughtMore('${h.id}')" title="Add a new purchase of this stock">Buy more</button>
         <button class="secondary" onclick="openThesisModal('${h.id}', 'holding')" title="${
           h.why ? "Why you own this" : "Not written down yet"
         }">Why${h.why ? " ✓" : ""}</button>
-        <button class="secondary" onclick="editHolding('${h.id}')">Edit</button>
+        <button class="secondary" onclick="editHolding('${h.id}')" title="Change the stop loss, the high it trails, the ISIN or the price">Change stop</button>
         <button class="danger" onclick="sellHolding('${h.id}')">Sell</button>
-      </td>
+      </div></td>
     `;
     tr.dataset.holdingId = h.id;
     body.appendChild(tr);
-    if (holdingStatus[h.id]) attachStatusLine(tr, holdingStatus[h.id]);
   }
 
   document.getElementById("grand-total").textContent = fmt(grandTotal);
   document.getElementById("grand-total-label").textContent = old.length ? "Active holdings total" : "Total value of assets";
   document.getElementById("active-share-classes").innerHTML = shareClassNote(holdings, grandTotal, "of active holdings");
   await renderCash();
+  renderNextYear(holdings);
+  renderStopTab(holdings);
 }
 
 // Money waiting at the broker after a sale. See cash.py. render() runs on every sale, purchase
@@ -2277,15 +2291,6 @@ async function fillStopSwing(id, ticker) {
   }
 }
 
-// The plain "nothing to do" status of each holding, kept so a re-render of the table can put
-// it back under its row. Alerts that need a decision (stop hit, new high) stay as panels.
-const holdingStatus = {};
-
-// One muted line under the holding's row, starting under the ticker — her call (2026-10-11):
-// a separate panel per holding repeated every ticker and read as a second table. Separate
-// facts joined by " · ", never one sentence: an earlier version glued next year's profit onto
-// the stop sentence and the two read as connected. Only next year — one number keeps a quiet
-// status quiet; silent when the ticker isn't in a Zacks Growth export.
 // "Profit expected to fall 28,4% next year" left her asking "from what?", and on DK and VLO
 // the answer matters: the base is this year's estimate, itself a spike. So both estimates are
 // stated and the % names what it compares. Zacks' figures are in the listing's currency (USD).
@@ -2298,37 +2303,10 @@ function profitPerShareText(result) {
   return `profit per share expected: ${usd(a)} this year → ${usd(b)} next year${change}`;
 }
 
-function attachStatusLine(tr, result) {
-  tr.nextElementSibling?.classList.contains("status-line") && tr.nextElementSibling.remove();
-  const dayWord = result.day_change_pct >= 0 ? "up" : "down";
-  const parts = [];
-  if (result.day_change_pct != null) parts.push(`${dayWord} ${fmtPct(Math.abs(result.day_change_pct))} today`);
-  parts.push(`${fmtPct(result.pct_above_stop)} above stop loss`);
-  const profit = profitPerShareText(result);
-  if (profit) parts.push(profit);
-  const sub = document.createElement("tr");
-  sub.className = "status-line";
-  const td = document.createElement("td");
-  td.colSpan = tr.children.length;
-  td.textContent = parts.join(" · ");
-  sub.appendChild(td);
-  tr.classList.add("has-status-line");
-  tr.after(sub);
-}
-
-function clearStatusLine(id) {
-  delete holdingStatus[id];
-  const tr = document.querySelector(`#holdings-body tr[data-holding-id="${id}"]`);
-  if (!tr) return;
-  tr.classList.remove("has-status-line");
-  if (tr.nextElementSibling?.classList.contains("status-line")) tr.nextElementSibling.remove();
-}
-
 function renderFlag(id, result) {
   const flagsDiv = document.getElementById("flags");
   const existing = document.getElementById(`flag-${id}`);
   if (existing) existing.remove();
-  clearStatusLine(id);
 
   if (result.skipped_manual) return;
   // Old holdings carry no stop, so there is no status line to draw for them.
@@ -2395,12 +2373,9 @@ function renderFlag(id, result) {
     return;
   }
 
-  if (!result.triggered) {
-    holdingStatus[id] = result;
-    const tr = document.querySelector(`#holdings-body tr[data-holding-id="${id}"]`);
-    if (tr) attachStatusLine(tr, result);
-    return;
-  }
+  // Nothing to decide: no line under the row any more (2026-11-24). Distance to the stop and
+  // next year's profit live in the Stop loss and Next year tabs below the table.
+  if (!result.triggered) return;
 
   const flag = document.createElement("div");
   flag.id = `flag-${id}`;
@@ -2513,7 +2488,7 @@ function showTab(name) {
   if (name === "watchlist") loadWatchlist();
 }
 
-const SUB_VIEWS = ["value", "weekly", "together", "market"];
+const SUB_VIEWS = ["value", "weekly", "together", "market", "nextyear", "stops"];
 const SUB_VIEW_KEY = "tradingtool.subview";
 
 // The four "how has it gone" panels share one slot. The data for all four is already loaded
@@ -4787,3 +4762,86 @@ initInfoTooltips();
 restoreSubView();
 startBuyForm("add");
 loadZacksStatus().then(() => render()).then(() => refreshAllPrices()).then(() => loadPortfolioChart()).then(() => loadConcentration()).then(() => loadBreadth());
+
+// "Next year" tab (2026-11-24, her design): the profit-per-share estimates that used to sit in
+// the line under each row, as one table. Read now and then, so it lives with the other
+// occasional views rather than on the daily surface. From the Zacks Growth export, overlaid
+// onto each holding by GET /api/holdings.
+function renderNextYear(holdings) {
+  const host = document.getElementById("next-year");
+  if (!host) return;
+  const usd = (v) => (v == null ? "—" : `$${fmt(v)}`);
+  const withEst = holdings.filter((h) => h.this_fy_est != null && h.next_fy_est != null);
+  const missing = holdings.filter((h) => h.this_fy_est == null || h.next_fy_est == null).map((h) => h.ticker);
+  withEst.sort((a, b) => (b.growth_next_year_pct ?? -1e9) - (a.growth_next_year_pct ?? -1e9));
+  const rows = withEst
+    .map((h) => {
+      const g = h.growth_next_year_pct;
+      const change =
+        g == null
+          ? `<span class="subtitle" title="This year's estimate is zero or a loss, so there is no % to give.">—</span>`
+          : `${g > 0 ? "+" : ""}${fmtPct(g / 100)}`;
+      return `<tr><td>${escapeHtml(h.ticker)}</td><td>${usd(h.this_fy_est)}</td><td>${usd(h.next_fy_est)}</td><td>${change}</td><td>${
+        h.next_report_date ? fmtDate(h.next_report_date) : "—"
+      }</td><td class="subtitle">${h.growth_as_of ? fmtDate(h.growth_as_of) : "—"}</td></tr>`;
+    })
+    .join("");
+  host.innerHTML = withEst.length
+    ? `<p class="subtitle">What analysts expect each company to earn per share, this year and next. In dollars, as Zacks reports them. Biggest expected rise first.</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Ticker</th><th>This year</th><th>Next year</th><th>Change</th><th>Next report</th><th>Estimate from</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>${
+        missing.length ? `<p class="subtitle">Not in your last Zacks Growth export: ${escapeHtml(missing.join(" · "))}.</p>` : ""
+      }`
+    : `<p class="empty">No estimates yet. Import a Zacks Growth export to fill this in.</p>`;
+}
+
+// "Stop loss" tab (2026-11-24, her design): each stop and how far today's price is from it,
+// closest first, plus how the stop has moved since the tool started recording it daily
+// (data/stop_history.json, from 24.11.2026: changes before that were never recorded).
+async function renderStopTab(holdings) {
+  const host = document.getElementById("stop-tab");
+  if (!host) return;
+  let history = [];
+  try {
+    history = await (await fetch("/api/stop-history")).json();
+  } catch (e) {
+    history = [];
+  }
+  const byTicker = {};
+  for (const p of history) (byTicker[p.ticker] = byTicker[p.ticker] || []).push(p);
+  const rows = holdings
+    .filter((h) => h.stop_price)
+    .map((h) => ({ h, above: h.current_price / h.stop_price - 1 }))
+    .sort((a, b) => a.above - b.above)
+    .map(({ h, above }) => {
+      const pts = (byTicker[h.ticker] || []).sort((a, b) => (a.date < b.date ? -1 : 1));
+      let moved = `<span class="subtitle">recording starts with the next refresh</span>`;
+      if (pts.length) {
+        const first = pts[0];
+        const steps = pts.slice(1).map((p, i) => p.stop_price - pts[i].stop_price);
+        const raises = steps.filter((d) => d > 1e-9).length;
+        const lowers = steps.filter((d) => d < -1e-9).length;
+        moved =
+          raises || lowers || Math.abs(first.stop_price - h.stop_price) > 1e-9
+            ? `${fmt(first.stop_price)} → ${fmt(h.stop_price)} since ${fmtDate(first.date)}${raises ? ` · raised ${raises}×` : ""}${
+                lowers ? ` · lowered ${lowers}×` : ""
+              }`
+            : `<span class="subtitle">unchanged since ${fmtDate(first.date)}</span>`;
+      }
+      return `<tr><td>${escapeHtml(h.ticker)}</td><td>${fmt(h.stop_price)}</td><td>${fmt(h.current_price)}</td><td class="${
+        above < 0 ? "price-down" : ""
+      }">${above < 0 ? "below by " + fmtPct(-above) : fmtPct(above)}</td><td>${h.reference_high ? fmt(h.reference_high) : "—"}</td><td>${
+        h.trailing_pct != null ? fmtPct(h.trailing_pct) : "—"
+      }</td><td>${moved}</td></tr>`;
+    })
+    .join("");
+  host.innerHTML = rows
+    ? `<p class="subtitle">Closest to its stop loss first. A stop loss trails the highest price since it was set: it moves up with the price, never down by itself.</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Ticker</th><th>Stop loss</th><th>Price today</th><th>Above stop loss</th><th>High it trails</th><th>Stop below high</th><th>How it moved</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`
+    : `<p class="empty">No stop losses set.</p>`;
+}

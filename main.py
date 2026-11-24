@@ -252,6 +252,30 @@ def record_holdings_snapshot(holdings: list[dict]) -> None:
             continue
         points.append({"date": today, "ticker": h["ticker"], "value": value})
     save_holdings_history(points)
+    record_stop_snapshot(holdings)
+
+
+STOP_HISTORY_FILE = Path(__file__).parent / "data" / "stop_history.json"
+
+
+def record_stop_snapshot(holdings: list) -> None:
+    """Today's stop loss and the high it trails, per active holding, one point per day
+    (2026-11-24). Nothing recorded how a stop moved before this, so the Stop loss tab shows
+    its history from this day on. Called from record_holdings_snapshot(), so it runs
+    wherever that does (refresh-all and the 08:00 check)."""
+    today = date.today().isoformat()
+    points = json.loads(STOP_HISTORY_FILE.read_text()) if STOP_HISTORY_FILE.exists() else []
+    points = [p for p in points if p["date"] != today]
+    for h in active_only(holdings):
+        if h.get("stop_price"):
+            points.append({"date": today, "ticker": h["ticker"], "stop_price": h["stop_price"],
+                           "reference_high": h.get("reference_high")})
+    STOP_HISTORY_FILE.write_text(json.dumps(points, indent=1))
+
+
+@app.get("/api/stop-history")
+def get_stop_history():
+    return json.loads(STOP_HISTORY_FILE.read_text()) if STOP_HISTORY_FILE.exists() else []
 
 
 def load_watchlist_history() -> list[dict]:

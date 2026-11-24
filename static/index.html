@@ -65,10 +65,9 @@
             <th>Buy in</th>
             <th class="sortable" onclick="sortBy('purchase_date')">Purchase date <span id="arrow-purchase_date" class="arrow"></span></th>
             <th>Stop loss</th>
-            <th>Trailing high</th>
-            <th>Trailing %</th>
             <th>Current price</th>
             <th class="sortable" onclick="sortBy('day_change_pct')">Today % <span id="arrow-day_change_pct" class="arrow"></span></th>
+            <th class="sortable" onclick="sortBy('since_purchase_pct')" title="Today's price against your buy-in (the average, if you bought more than once). Before tax.">Since purchase <span id="arrow-since_purchase_pct" class="arrow"></span></th>
             <th class="sortable" onclick="sortBy('total')">Total <span id="arrow-total" class="arrow"></span></th>
             <th class="sortable" onclick="sortBy('portfolio_pct')">% Portfolio <span id="arrow-portfolio_pct" class="arrow"></span></th>
             <th>Zacks / Cons. <span class="info" tabindex="0"><span class="tooltip"><strong>Zacks Rank / analyst consensus average.</strong> Zacks Rank: 1 (Strong Buy) to 5 (Strong Sell), from your last CSV import — dash if this ticker isn't in it. Consensus average: same 1–5 scale, from live analyst ratings fetched on refresh.</span></span></th>
@@ -125,6 +124,8 @@
         <button class="subtab-btn" id="sub-btn-weekly" role="tab" onclick="showSubView('weekly')">Week by week</button>
         <button class="subtab-btn" id="sub-btn-together" role="tab" onclick="showSubView('together')">Move together</button>
         <button class="subtab-btn" id="sub-btn-market" role="tab" onclick="showSubView('market')">The market</button>
+        <button class="subtab-btn" id="sub-btn-nextyear" role="tab" onclick="showSubView('nextyear')">Next year</button>
+        <button class="subtab-btn" id="sub-btn-stops" role="tab" onclick="showSubView('stops')">Stop loss</button>
       </div>
 
       <div id="sub-value" class="subtab-content">
@@ -148,6 +149,16 @@
       <div id="sub-market" class="subtab-content" style="display:none">
         <h2>How much of the market is participating <span class="info" tabindex="0">i<span class="tooltip">The share of US stocks trading above their own 200-day and 50-day averages. A rise carried by most stocks is a different environment from one carried by a few — breakout setups fail more often in the second. Third-party public data, fetched once a day.</span></span></h2>
         <div id="breadth"><p class="empty">Loading…</p></div>
+      </div>
+
+      <div id="sub-nextyear" class="subtab-content" style="display:none">
+        <h2>Profit expected next year</h2>
+        <div id="next-year"><p class="empty">Loading…</p></div>
+      </div>
+
+      <div id="sub-stops" class="subtab-content" style="display:none">
+        <h2>Your stop losses</h2>
+        <div id="stop-tab"><p class="empty">Loading…</p></div>
       </div>
     </div>
 
