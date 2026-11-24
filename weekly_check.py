@@ -143,6 +143,43 @@ def _down_streak(closes: dict) -> int:
     return n
 
 
+def double_bottom(closes: dict, since: str) -> Optional[dict]:
+    """A W confirmed on or after `since` (24.11.2026, her request after learning the pattern).
+    The textbook checks, on daily closes: a real fall first (10%+ in the 60 days before the
+    first low), two lows within 5% of each other, 15 to 120 trading days apart, a peak
+    between them at least 8% higher, and the first close above that peak (the confirmation).
+    Volume is the one textbook check missing: L&S gives prices only."""
+    d = sorted(closes)
+    c = [closes[x] for x in d]
+    n, w = len(c), 10
+    troughs = [i for i in range(w, n) if c[i] == min(c[max(0, i - w):i + w + 1])]
+    best = None
+    for a, i in enumerate(troughs):
+        if max(c[max(0, i - 60):i] or [0]) < c[i] * 1.10:
+            continue
+        for j in troughs[a + 1:]:
+            if j - i < 15 or j - i > 120 or abs(c[j] / c[i] - 1) > 0.05:
+                continue
+            pk = max(range(i, j + 1), key=lambda k: c[k])
+            if c[pk] / max(c[i], c[j]) - 1 < 0.08:
+                continue
+            conf = next((k for k in range(j + 1, n) if c[k] > c[pk]), None)
+            # Latest confirmation first; among pairs confirmed the same day, the deepest lows
+            # (the real bottom, as a person would draw the W).
+            key = (conf or 0, -min(c[i], c[j]))
+            if conf is not None and d[conf] >= since and (best is None or key > best["key"]):
+                best = {"low1": (d[i], c[i]), "low2": (d[j], c[j]), "peak": (d[pk], c[pk]),
+                        "confirmed": (d[conf], c[conf]), "key": key}
+    return best
+
+
+def w_text(w: dict) -> str:
+    depth = w["peak"][1] - min(w["low1"][1], w["low2"][1])
+    return (f"W confirmed (double bottom): lows {_eu(w['low1'][1])} ({_d(w['low1'][0])}) and {_eu(w['low2'][1])} "
+            f"({_d(w['low2'][0])}), closed above the middle peak {_eu(w['peak'][1])} on {_d(w['confirmed'][0])}. "
+            f"Textbook stop loss: below {_eu(w['low2'][1])}. Rough guide: about {_eu(w['peak'][1] + depth)}.")
+
+
 def _growth(point: dict) -> Optional[float]:
     if point and point.get("this") and point["this"] > 0 and point.get("next") is not None:
         return point["next"] / point["this"] - 1
@@ -151,7 +188,7 @@ def _growth(point: dict) -> Optional[float]:
 
 def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optional[dict] = None,
           reports: Optional[dict] = None, bloc: Optional[dict] = None, review_pct: Optional[float] = None,
-          today: Optional[date] = None) -> dict:
+          watch_closes: Optional[dict] = None, today: Optional[date] = None) -> dict:
     """Subject, body, and the ranks and Opportunities B scores to remember for next week.
     `closes_for(holding)` returns {date: close}; `scores` is {ticker: composite} (computed by
     the caller, since it costs Finnhub calls)."""
@@ -252,6 +289,9 @@ def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optiona
         streak = _down_streak(closes)
         if streak >= DOWN_DAYS:
             lines.append(f"Fell {streak} days in a row.")
+        w = double_bottom(closes, (today - timedelta(days=7)).isoformat())
+        if w:
+            lines.append(w_text(w))
         trend = _price_trend(closes)
         if trend and trend["vs_avg"] < 0 and trend["avg_falling"]:
             lines.append(f"Falling: below its 50-day average, which is itself going down; {_pct(trend['four_weeks'])} in four weeks.")
@@ -303,6 +343,14 @@ def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optiona
         for t, lines in flagged:
             body += ["", t] + [f"  - {l}" for l in lines]
         body.append("")
+    # Watch list: only a W confirmed this week, the moment best practice buys at.
+    watch_ws = []
+    for t, closes in (watch_closes or {}).items():
+        w = double_bottom(closes or {}, (today - timedelta(days=7)).isoformat())
+        if w:
+            watch_ws.append(f"{t}: {w_text(w)}")
+    if watch_ws:
+        body += ["On your watch list:"] + [f"  - {x}" for x in watch_ws] + [""]
     if raised:
         body.append("Next year's estimate raised this week: " + " · ".join(raised) + ".")
     if quiet:

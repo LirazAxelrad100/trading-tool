@@ -221,10 +221,17 @@ def weekly_email(holdings: list) -> None:
         review_pct = json.loads(main.SIZING_RULES_FILE.read_text()).get("review_pct")
     except Exception:
         review_pct = None
+    watch_closes = {}
+    for it in main.load_watchlist():
+        try:
+            watch_closes[it["ticker"]] = main.ls_closes_for(it["ticker"], it.get("current_price"))
+        except Exception:
+            pass  # a ticker L&S doesn't carry is simply not checked
     report = weekly_check.build(
         active, growth,
         lambda h: ls_tc.daily_closes(h["isin"]) if h.get("isin") else {}, state,
         scores=scores, reports=reports, bloc=bloc, review_pct=review_pct,
+        watch_closes=watch_closes,
     )
     if send_email_with_retry(report["subject"], report["body"]):
         weekly_check.mark_sent(report)
