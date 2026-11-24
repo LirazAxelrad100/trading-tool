@@ -2874,10 +2874,17 @@ const ruleEur = (n) => euIntFormat.format(Math.round(n / 10) * 10);
 // The rules sentence above the table, the Check button for tickers without enough data, and
 // the review line. The per-ticker reading sits under each row (watchRuleLine), at her request
 // — a second table repeated every ticker she had just read above it.
+// The tickers Check would fetch, kept here rather than written into the button's onclick:
+// escapeHtml leaves quotes alone, so a JSON list inside the attribute cut it short and the
+// button did nothing at all (found 2026-11-24, when she clicked it and nothing happened).
+let watchRulesMissing = [];
+let watchRulesNote = ""; // what the last Check did, shown until the next one
+
 function renderWatchRules(d) {
   const host = document.getElementById("watch-rules");
   const r = d.rules;
   const missing = d.rows.filter((row) => !row.level || !row.bloc || row.bloc === "too_few_days").map((row) => row.ticker);
+  watchRulesMissing = missing;
   const review = d.review.length
     ? ` ${d.review
         .map((h) => `<strong>${escapeHtml(h.ticker)}</strong> (${fmtPct(h.pct / 100)})`)
@@ -2887,13 +2894,15 @@ function renderWatchRules(d) {
     ((d.money_total ?? d.active_total) * r.target_pct) / 100
   )} today, ${r.target_pct}% of your holdings plus cash), less for wild stocks, so a stop loss never loses more than ${ruleEur(r.max_stop_loss_eur)}.${
     d.bloc
-      ? ` No new AI companies. Your AI stocks (${escapeHtml(d.bloc.tickers.join(" · "))}) move together, and the line under each ticker says if it moves with them.`
+      ? ` No new AI companies. ${escapeHtml(d.bloc.tickers.join(" · "))} move together on price, and the line under each ticker says if it moves with them.`
       : " No new AI companies. The line under each ticker says if its price moves with something you own."
-  }${review}${
+  }${review}</p>${
     missing.length
-      ? ` <button class="secondary" onclick="checkWatchRules(${escapeHtml(JSON.stringify(missing))})">Check</button> the ${missing.length} without enough data (${missing.length} of your 25 daily price lookups).`
+      ? `<p><button onclick="checkWatchRules()">Check ${missing.length} ${missing.length === 1 ? "ticker" : "tickers"}</button> <span class="subtitle" id="watch-rules-status">${escapeHtml(
+          missing.join(" · ")
+        )} have no price history yet. Uses ${missing.length} of your 25 daily price lookups.</span></p>`
       : ""
-  }</p>`;
+  }${watchRulesNote ? `<p class="subtitle">${watchRulesNote}</p>` : ""}`;
 }
 
 // One line under a watch-list row: the amount her rules allow, her stop loss, what she would
@@ -2913,7 +2922,7 @@ function watchRuleLine(row) {
       `<span class="price-down" title="Before tax. A loss goes into your loss pot and lowers the tax on later profits, so it costs you about a quarter less in the end. A gap overnight can sell below the stop loss.">−${ruleEur(row.stop_loss_eur)}</span> if it fires`
     );
   } else {
-    parts.push(`Your rules: <span class="subtitle">not checked yet (Check above)</span>`);
+    parts.push(`Your rules: <span class="subtitle">no price history yet. Press Check above the table</span>`);
   }
   // How the price moves, never what the company does. The tool can't tell an AI company
   // from one that only trades like them — KEYS is not AI, yet moves with the AI stocks — so
@@ -2921,7 +2930,7 @@ function watchRuleLine(row) {
   // and her #tags hold it. The one extra note is a stock moving with something she owns
   // outside that group: PBF with VLO is the DK situation again.
   if (row.bloc === "joins")
-    parts.push(`<span class="sig-mid" title="Its price has moved with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days, so on a bad day for your AI stocks it would likely fall with them — whatever the company does.">moves with your AI stocks</span>`);
+    parts.push(`<span class="sig-mid" title="Its price has moved with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days, so on a bad day for ${escapeHtml(watchRules.bloc.tickers.join(" · "))} it would likely fall with them — whatever the company does.">moves with ${escapeHtml(watchRules.bloc.tickers.join(" · "))}</span>`);
   else if (row.bloc === "moves_with") parts.push(`moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
   else if (row.bloc === "leans")
     parts.push(`<span title="Price link ${fmt(row.bloc_closest.correlation)} over ${row.bloc_days} days, just under the ${fmt(0.5)} bar. Not one position, but not independent either.">leans towards ${escapeHtml(row.bloc_closest.ticker)}, which you own</span>`);
@@ -2929,21 +2938,32 @@ function watchRuleLine(row) {
     parts.push(`<span title="Closest: ${escapeHtml(row.bloc_closest.ticker)}, price link ${fmt(row.bloc_closest.correlation)} over ${row.bloc_days} days. Measured against what you own today.">moves on its own</span>`);
   else if (row.bloc === "too_few_days")
     parts.push(`<span class="subtitle">how it moves: ${row.bloc_days} of ${watchRules.min_days || 20} days so far</span>`);
-  else if (row.level) parts.push(`<span class="subtitle">how it moves: not checked yet (Check above)</span>`);
+  else if (row.level) parts.push(`<span class="subtitle">how it moves: press Check above the table</span>`);
   return parts.join(" · ");
 }
 
-async function checkWatchRules(tickers) {
+// Shows each step while it runs and says afterwards what worked, so a click is never silent.
+async function checkWatchRules() {
+  const tickers = [...watchRulesMissing];
   const host = document.getElementById("watch-rules");
+  const button = host.querySelector("button");
+  const status = document.getElementById("watch-rules-status");
+  if (button) button.disabled = true;
+  const failed = [];
   for (const [i, t] of tickers.entries()) {
-    host.querySelector("button") && (host.querySelector("button").disabled = true);
+    if (status) status.textContent = `Checking ${t} (${i + 1} of ${tickers.length})…`;
     if (i) await new Promise((r) => setTimeout(r, 1500)); // the free key refuses bursts
     try {
-      await fetch(`/api/risk/stop-default/${encodeURIComponent(t)}`);
+      const res = await fetch(`/api/risk/stop-default/${encodeURIComponent(t)}`);
+      if (!res.ok) failed.push(t);
     } catch (e) {
-      /* one failed ticker shouldn't stop the rest */
+      failed.push(t); // one failed ticker shouldn't stop the rest
     }
   }
+  const done = tickers.length - failed.length;
+  watchRulesNote = failed.length
+    ? `Checked ${done} of ${tickers.length}. No prices for ${escapeHtml(failed.join(" · "))}: the 25 daily lookups may be used up, so try again tomorrow.`
+    : `Done: ${escapeHtml(tickers.join(" · "))} checked. Their lines below are filled in.`;
   await loadWatchRules();
 }
 
