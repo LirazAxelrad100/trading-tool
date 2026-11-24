@@ -248,6 +248,9 @@ def import_growth_csv(path: Path) -> dict:
     data["last_imported_at"] = now
     data["last_source_file"] = path.name
     GROWTH_FILE.write_text(json.dumps(data, indent=2))
+    # Week-on-week estimate changes for the Monday email (weekly_check.py).
+    import weekly_check
+    weekly_check.record_estimates(new_entries, now[:10])
     return {
         "imported_count": len(new_entries),
         "source_file": path.name,

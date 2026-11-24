@@ -7,9 +7,11 @@ from datetime import date, datetime
 from pathlib import Path
 
 import insiders
+import ls_tc
 import main
 import notifier
 import prices
+import weekly_check
 import zacks_import
 
 RETRY_ATTEMPTS = 3
@@ -199,6 +201,21 @@ def checkpoint_emails() -> None:
         CHECKPOINTS_FILE.write_text(json.dumps(checkpoints, indent=2, ensure_ascii=False))
 
 
+def weekly_email(holdings: list) -> None:
+    """Once a week, from Monday: what changed for each active holding (weekly_check.py).
+    Marked sent only after the email went out, so a failed send tries again tomorrow."""
+    state = weekly_check.load_state()
+    if not weekly_check.due(state):
+        return
+    growth = (json.loads(zacks_import.GROWTH_FILE.read_text()) if zacks_import.GROWTH_FILE.exists() else {}).get("growth") or {}
+    report = weekly_check.build(
+        main.active_only(holdings), growth,
+        lambda h: ls_tc.daily_closes(h["isin"]) if h.get("isin") else {}, state,
+    )
+    if send_email_with_retry(report["subject"], report["body"]):
+        weekly_check.mark_sent(report["ranks"])
+
+
 WATCH_FILE = Path(__file__).parent / "data" / "early_warning.json"
 NEWS_DAYS = 3  # covers a missed day or a weekend; `seen` stops repeats
 
@@ -362,6 +379,12 @@ def run() -> bool:
         early_warning_emails()
     except Exception as e:
         print(f"early warning skipped: {e}")
+
+    # The Monday email (weekly_check.py): same rule, never at the stop check's expense.
+    try:
+        weekly_email(holdings)
+    except Exception as e:
+        print(f"weekly check skipped: {e}")
 
     if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")
