@@ -3603,7 +3603,21 @@ function sameCompany(asset, h) {
   if (a === h.ticker.toLowerCase()) return true;
   // A ticker outside the S&P 500 file has no company name to compare with.
   if (!h.company || h.company === h.ticker) return true;
-  return a.split(/\s+/)[0] === h.company.toLowerCase().split(/\s+/)[0];
+  const first = (name) => companyWords(name)[0];
+  if (first(a) && first(a) === first(h.company)) return true;
+  // The S&P 500 file turns some names around: "Lilly (Eli)" where Trade Republic says
+  // "Eli Lilly & Co". The same words in another order are the same company.
+  const x = companyWords(a);
+  const y = companyWords(h.company);
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length > 1 && short.every((w) => long.includes(w));
+}
+
+const COMPANY_FILLER = ["the", "co", "company", "inc", "corp", "corporation", "plc", "ltd", "and", "class", "a", "b", "c"];
+function companyWords(name) {
+  const words = name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const kept = words.filter((w) => !COMPANY_FILLER.includes(w));
+  return kept.length ? kept : words;
 }
 
 const near = (a, b, within) => Math.abs(a - b) <= within;
