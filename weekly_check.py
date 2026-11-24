@@ -40,6 +40,9 @@ BACKUP_DIR = Path.home() / "Documents" / "trading-tool-backups"
 NEAR_STOP = 0.05  # within 5% above the stop loss
 REPORT_SOON_DAYS = 14  # time to write a decision question first
 ESTIMATE_MOVE = 0.005  # a change under 0,5% is rounding, not a revision
+GROWTH_LINE = 0.25  # her line (24.11): next year growing less than 25% on this year
+DOWN_DAYS = 5  # her line (24.11): five falling closes in a row
+SCORE_DROP = 0.05  # Opportunities B composite runs 0-1; smaller moves are one analyst
 STALE_DAYS = 8  # an export older than this is called out
 
 
@@ -132,8 +135,29 @@ def _price_trend(closes: dict) -> Optional[dict]:
     return {"vs_avg": c[-1] / avg_now - 1, "avg_falling": avg_now < avg_before, "four_weeks": c[-1] / c[-21] - 1}
 
 
-def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional[date] = None) -> dict:
-    """Subject, body and the ranks to remember. `closes_for(holding)` returns {date: close}."""
+def _down_streak(closes: dict) -> int:
+    c = [closes[d] for d in sorted(closes)]
+    n = 0
+    while n + 1 < len(c) and c[-1 - n] < c[-2 - n]:
+        n += 1
+    return n
+
+
+def _growth(point: dict) -> Optional[float]:
+    if point and point.get("this") and point["this"] > 0 and point.get("next") is not None:
+        return point["next"] / point["this"] - 1
+    return None
+
+
+def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optional[dict] = None,
+          reports: Optional[dict] = None, bloc: Optional[dict] = None, review_pct: Optional[float] = None,
+          today: Optional[date] = None) -> dict:
+    """Subject, body, and the ranks and Opportunities B scores to remember for next week.
+    `closes_for(holding)` returns {date: close}; `scores` is {ticker: composite} (computed by
+    the caller, since it costs Finnhub calls)."""
+    scores, reports = scores or {}, reports or {}
+    last_scores = state.get("scores") or {}
+    seen_periods = state.get("periods") or {}
     today = today or date.today()
     hist = _load_history()
     update, update_date = latest_export("update")
@@ -162,6 +186,20 @@ def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional
             now = points[latest]["next"]
             week = _point_before(points, latest, 6)
             month = _point_before(points, latest, 27)
+            # Her line: growth next year dropping under 25%, said the week it crosses, not every
+            # week after (MSFT, WST and BLCO were already under it when she set it).
+            g_now, g_week = _growth(points[latest]), _growth(week[1]) if week else None
+            if g_now is not None and g_week is not None and g_week >= GROWTH_LINE > g_now:
+                lines.append(f"Expected growth next year dropped under your 25% line: {_pct(g_week)} → {_pct(g_now)}.")
+            # Since purchase: the estimate on the day she bought (or the earliest recorded).
+            bought = (h.get("purchase_date") or "")[:10]
+            if now is not None and bought:
+                before = [d for d in points if d <= bought]
+                base_day = max(before) if before else min(points)
+                base = points[base_day]["next"]
+                if base and base_day != latest and now / base - 1 <= -ESTIMATE_MOVE:
+                    when = f"when you bought ({_d(bought)})" if before else f"since {_d(base_day)}, the earliest recorded"
+                    lines.append(f"Next year's estimate lower than {when}: ${_eu(base)} → ${_eu(now)} ({_pct(now / base - 1)}).")
             if week and now is not None and week[1]["next"]:
                 compared_days.add(week[0])
                 ch = now / week[1]["next"] - 1
@@ -183,6 +221,15 @@ def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional
                 lines.append(f"Zacks Rank worse: {was} → {int(rank)}.")
             elif rank >= 4 and not was:
                 lines.append(f"Zacks Rank {int(rank)} (sell side).")
+        # A profit miss, said once: the first week a new quarter appears with profit under
+        # the estimate. MSFT's wrong-if, and it fits every holding.
+        rep_ = reports.get(t)
+        if rep_ and rep_.get("period") != seen_periods.get(t) and t in seen_periods:
+            if rep_.get("actual") is not None and rep_.get("estimate") is not None and rep_["actual"] < rep_["estimate"]:
+                lines.append(f"Missed at its last report: profit per share ${_eu(rep_['actual'])} against ${_eu(rep_['estimate'])} expected.")
+        sc, was_sc = scores.get(t), last_scores.get(t)
+        if sc is not None and was_sc is not None and was_sc - sc >= SCORE_DROP:
+            lines.append(f"Opportunities B score down: {_eu(was_sc)} → {_eu(sc)}.")
         b = broker.get(t)
         if b:
             down = _num(_col(b, "Downgrades")) or 0
@@ -201,7 +248,11 @@ def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional
                 lines.append(f"Below its stop loss ({_eu(stop)}) by {_pct(-gap, sign=False)}.")
             elif gap <= NEAR_STOP:
                 lines.append(f"{_pct(gap, sign=False)} above its stop loss ({_eu(stop)}).")
-        trend = _price_trend(closes_for(h) or {})
+        closes = closes_for(h) or {}
+        streak = _down_streak(closes)
+        if streak >= DOWN_DAYS:
+            lines.append(f"Fell {streak} days in a row.")
+        trend = _price_trend(closes)
         if trend and trend["vs_avg"] < 0 and trend["avg_falling"]:
             lines.append(f"Falling: below its 50-day average, which is itself going down; {_pct(trend['four_weeks'])} in four weeks.")
 
@@ -229,6 +280,23 @@ def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional
             head.append(f"Your '{name}' export is from {_d(d)}: export it again for this week's figures.")
     head.append("")
 
+    # The portfolio as a whole: her two rules that no single holding can show.
+    total = sum(h["shares"] * h["current_price"] for h in holdings)
+    if bloc and bloc.get("tickers"):
+        was = state.get("bloc_pct")
+        head.append(
+            f"Moving together: {' · '.join(bloc['tickers'])}, {_pct(bloc['weight_pct'] / 100, sign=False)} of your active money"
+            + (f" (last week {_pct(was / 100, sign=False)})." if was is not None else ".")
+        )
+    elif bloc is not None:
+        head.append("Moving together: no group of your holdings moves together right now.")
+    if review_pct and total:
+        past = sorted(((h["ticker"], h["shares"] * h["current_price"] / total) for h in holdings
+                       if h["shares"] * h["current_price"] / total * 100 >= review_pct), key=lambda x: -x[1])
+        if past:
+            head.append(f"Past your {review_pct:g}% review line: " + " · ".join(f"{t} ({_pct(p, sign=False)})" for t, p in past) + ".")
+    head.append("")
+
     body = head
     if flagged:
         body.append("Worth a look:")
@@ -243,7 +311,10 @@ def build(holdings: list, growth: dict, closes_for, state: dict, today: Optional
 
     n = len(flagged)
     subject = f"Weekly check: {n} holding{'s' if n != 1 else ''} worth a look" if n else "Weekly check: nothing new"
-    return {"subject": subject, "body": "\n".join(body), "ranks": ranks}
+    return {"subject": subject, "body": "\n".join(body), "ranks": ranks,
+            "scores": {t: v for t, v in scores.items() if v is not None},
+            "periods": {**seen_periods, **{t: r["period"] for t, r in reports.items() if r}},
+            "bloc_pct": bloc["weight_pct"] if bloc and bloc.get("tickers") else None}
 
 
 def due(state: dict, today: Optional[date] = None) -> bool:
@@ -256,6 +327,31 @@ def load_state() -> dict:
     return json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
 
 
-def mark_sent(ranks: dict, today: Optional[date] = None) -> None:
+def mark_sent(report: dict, today: Optional[date] = None) -> None:
     today = today or date.today()
-    STATE_FILE.write_text(json.dumps({"last_week": today.strftime("%G-W%V"), "sent_on": today.isoformat(), "ranks": ranks}, indent=1))
+    STATE_FILE.write_text(json.dumps({"last_week": today.strftime("%G-W%V"), "sent_on": today.isoformat(),
+                                      **{k: report.get(k) for k in ("ranks", "scores", "periods", "bloc_pct")}}, indent=1))
+
+
+def finnhub_readings(tickers: list) -> tuple:
+    """Each holding's Opportunities B composite and its latest reported quarter (three free
+    Finnhub calls each, a second apart for its rate limit). A failure leaves the ticker out
+    rather than stopping the email."""
+    import time
+    import opportunities_b
+    import prices
+    scores, reports = {}, {}
+    for i, t in enumerate(tickers):
+        if i:
+            time.sleep(1)
+        try:
+            r = opportunities_b.score_ticker(t)
+            scores[t] = r["composite"] if r else None
+        except Exception:
+            scores[t] = None
+        try:
+            rows = prices.fetch_earnings_history(t, limit=1)
+            reports[t] = rows[0] if rows else None
+        except Exception:
+            reports[t] = None
+    return scores, reports

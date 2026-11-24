@@ -6,6 +6,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
+import concentration
 import insiders
 import ls_tc
 import main
@@ -208,12 +209,25 @@ def weekly_email(holdings: list) -> None:
     if not weekly_check.due(state):
         return
     growth = (json.loads(zacks_import.GROWTH_FILE.read_text()) if zacks_import.GROWTH_FILE.exists() else {}).get("growth") or {}
+    active = main.active_only(holdings)
+    scores, reports = weekly_check.finnhub_readings([h["ticker"] for h in active])
+    try:
+        result = concentration.analyze(active, main.load_holdings_history(), main.load_sales_history())
+        groups = result.get("groups") or []
+        bloc = None if result.get("error") else (groups[0] if groups else {})
+    except Exception:
+        bloc = None  # the line is left out rather than guessed
+    try:
+        review_pct = json.loads(main.SIZING_RULES_FILE.read_text()).get("review_pct")
+    except Exception:
+        review_pct = None
     report = weekly_check.build(
-        main.active_only(holdings), growth,
+        active, growth,
         lambda h: ls_tc.daily_closes(h["isin"]) if h.get("isin") else {}, state,
+        scores=scores, reports=reports, bloc=bloc, review_pct=review_pct,
     )
     if send_email_with_retry(report["subject"], report["body"]):
-        weekly_check.mark_sent(report["ranks"])
+        weekly_check.mark_sent(report)
 
 
 WATCH_FILE = Path(__file__).parent / "data" / "early_warning.json"
