@@ -177,7 +177,8 @@ def w_text(w: dict) -> str:
     depth = w["peak"][1] - min(w["low1"][1], w["low2"][1])
     return (f"W confirmed (double bottom): lows {_eu(w['low1'][1])} ({_d(w['low1'][0])}) and {_eu(w['low2'][1])} "
             f"({_d(w['low2'][0])}), closed above the middle peak {_eu(w['peak'][1])} on {_d(w['confirmed'][0])}. "
-            f"Textbook stop loss: below {_eu(w['low2'][1])}. Rough guide: about {_eu(w['peak'][1] + depth)}.")
+            f"Textbook stop loss: below {_eu(w['low2'][1])}. Textbook target: about {_eu(w['peak'][1] + depth)} "
+            f"(the depth of the W added above the middle peak; a rule of thumb, not a forecast).")
 
 
 def _growth(point: dict) -> Optional[float]:
