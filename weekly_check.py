@@ -16,8 +16,8 @@ Sources, all free:
 - Estimates: the Zacks Growth export, compared week on week through `estimate_history.json`
   (recorded on every import, backfilled from the daily backups). Zacks' screener can't
   restrict a screen to her portfolio, so the 4-week estimate-change columns aren't available.
-- Zacks Rank and analysts: her portfolio's "Daily update" and "Broker recs" exports, read
-  straight from ~/Downloads (newest file of each). Stale or missing files are said, not hidden.
+- Zacks Rank and analysts: her portfolio's "Daily update" and "Broker recs" exports, newest
+  file of each (keep_exports() copies them out of ~/Downloads). Stale or missing files are said, not hidden.
 - Price trend: Lang & Schwarz daily closes (ls_tc.daily_closes), EUR, no daily cap.
 
 Sent once per week, on the first daily run from Monday 08:00 (daily_check.weekly_email()).
@@ -26,6 +26,7 @@ Sent once per week, on the first daily run from Monday 08:00 (daily_check.weekly
 import csv
 import json
 import re
+import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -35,6 +36,8 @@ ESTIMATE_HISTORY_FILE = DATA_DIR / "estimate_history.json"
 STATE_FILE = DATA_DIR / "weekly_check_state.json"
 CHECKPOINTS_FILE = DATA_DIR / "checkpoints.json"
 DOWNLOADS_DIR = Path.home() / "Downloads"
+EXPORTS_DIR = DATA_DIR / "zacks_exports"
+REMINDER_FILE = DATA_DIR / "export_reminder.json"
 BACKUP_DIR = Path.home() / "Documents" / "trading-tool-backups"
 
 NEAR_STOP = 0.05  # within 5% above the stop loss
@@ -93,9 +96,27 @@ def _num(s) -> Optional[float]:
         return None
 
 
+def keep_exports() -> list:
+    """Copy new Daily update and Broker recs exports out of Downloads, so the Monday email still
+    finds them after she clears that folder (24.11.2026: both were gone the same day). Called by
+    zacks_watch_import whenever Downloads changes. Growth needs no copy: its import stores it."""
+    kept = []
+    for kind in ("update", "broker"):
+        for path in DOWNLOADS_DIR.glob(f"*_-_{kind}-*.csv"):
+            dest = EXPORTS_DIR / path.name
+            if dest.exists() and dest.stat().st_mtime >= path.stat().st_mtime:
+                continue
+            EXPORTS_DIR.mkdir(exist_ok=True)
+            shutil.copy2(path, dest)
+            kept.append(path.name)
+    return kept
+
+
 def latest_export(kind: str) -> tuple:
-    """({ticker: row}, file date) from the newest '<portfolio>_-_<kind>-YYYY-MM-DD.csv'."""
-    files = sorted(DOWNLOADS_DIR.glob(f"*_-_{kind}-*.csv"), key=lambda p: p.stat().st_mtime)
+    """({ticker: row}, file date) from the newest '<portfolio>_-_<kind>-YYYY-MM-DD.csv', in
+    Downloads or among the copies kept from it."""
+    files = sorted((p for d in (DOWNLOADS_DIR, EXPORTS_DIR) for p in d.glob(f"*_-_{kind}-*.csv")),
+                   key=lambda p: p.stat().st_mtime)
     if not files:
         return {}, None
     path = files[-1]
@@ -316,7 +337,7 @@ def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optiona
             head.append("That export is more than a week old: export Growth again for current estimates.")
     for name, d in (("Daily update", update_date), ("Broker recs", broker_date)):
         if not d:
-            head.append(f"No '{name}' export found in Downloads, so its part is missing.")
+            head.append(f"No '{name}' export found, so its part is missing.")
         elif (today - date.fromisoformat(d)).days > STALE_DAYS:
             head.append(f"Your '{name}' export is from {_d(d)}: export it again for this week's figures.")
     head.append("")
@@ -380,6 +401,40 @@ def mark_sent(report: dict, today: Optional[date] = None) -> None:
     today = today or date.today()
     STATE_FILE.write_text(json.dumps({"last_week": today.strftime("%G-W%V"), "sent_on": today.isoformat(),
                                       **{k: report.get(k) for k in ("ranks", "scores", "periods", "bloc_pct")}}, indent=1))
+
+
+def export_reminder(growth_imported_at: Optional[str], today: Optional[date] = None) -> Optional[dict]:
+    """The Sunday email (her request, 24.11.2026): which Zacks exports tomorrow's check still
+    needs. None on other days, when all three were exported this weekend, or once sent."""
+    today = today or date.today()
+    if today.weekday() != 6:
+        return None
+    if REMINDER_FILE.exists() and json.loads(REMINDER_FILE.read_text()).get("sent_on") == today.isoformat():
+        return None
+    saturday = (today - timedelta(days=1)).isoformat()
+    exports = [
+        ("Growth", "next year's estimates", (growth_imported_at or "")[:10] or None),
+        ("Daily update", "Zacks Rank", latest_export("update")[1]),
+        ("Broker recs", "analyst upgrades and downgrades", latest_export("broker")[1]),
+    ]
+    needed = [e for e in exports if not e[2] or e[2] < saturday]
+    if not needed:
+        return None
+    done = [e[0] for e in exports if e not in needed]
+    body = ["For tomorrow's weekly check, export these from your Zacks portfolio page",
+            "(open the tab, then press Export):", ""]
+    body += [f"  - {name} ({what}): " + (f"last export {_d(d)}" if d else "no export yet") for name, what, d in needed]
+    body.append("")
+    if done:
+        body += [f"Already exported this weekend: {', '.join(done)}.", ""]
+    body.append("The tool picks the files up from Downloads by itself. Anything you don't export is"
+                " checked from the older file, and the Monday email says so when it is more than a week old.")
+    n = len(needed)
+    return {"subject": f"Zacks: {n} export{'s' if n != 1 else ''} for tomorrow's weekly check", "body": "\n".join(body)}
+
+
+def mark_reminded(today: Optional[date] = None) -> None:
+    REMINDER_FILE.write_text(json.dumps({"sent_on": (today or date.today()).isoformat()}))
 
 
 def finnhub_readings(tickers: list) -> tuple:

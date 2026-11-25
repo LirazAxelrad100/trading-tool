@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 
+import weekly_check
 import zacks_import
 
 DOWNLOADS_DIR = Path.home() / "Downloads"
@@ -52,6 +53,13 @@ def run() -> None:
         processed[path.name] = mtime
 
     save_state(state)
+
+    # The Monday email's other two exports: kept, not imported (weekly_check.keep_exports).
+    try:
+        for name in weekly_check.keep_exports():
+            print(f"Kept {name} for the weekly email")
+    except Exception as e:
+        print(f"Keeping the weekly exports failed: {e}")
 
 
 if __name__ == "__main__":

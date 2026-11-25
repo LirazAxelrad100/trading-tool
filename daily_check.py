@@ -237,6 +237,14 @@ def weekly_email(holdings: list) -> None:
         weekly_check.mark_sent(report)
 
 
+def export_reminder_email() -> None:
+    """Sundays: the Zacks exports tomorrow's weekly check still needs (weekly_check.py)."""
+    data = json.loads(zacks_import.GROWTH_FILE.read_text()) if zacks_import.GROWTH_FILE.exists() else {}
+    reminder = weekly_check.export_reminder(data.get("last_imported_at"))
+    if reminder and send_email_with_retry(reminder["subject"], reminder["body"]):
+        weekly_check.mark_reminded()
+
+
 WATCH_FILE = Path(__file__).parent / "data" / "early_warning.json"
 NEWS_DAYS = 3  # covers a missed day or a weekend; `seen` stops repeats
 
@@ -406,6 +414,11 @@ def run() -> bool:
         weekly_email(holdings)
     except Exception as e:
         print(f"weekly check skipped: {e}")
+
+    try:
+        export_reminder_email()
+    except Exception as e:
+        print(f"export reminder skipped: {e}")
 
     if not breakouts and not stop_hits and not errors and not dividends_due:
         print(f"{date.today()}: nothing to report.")
