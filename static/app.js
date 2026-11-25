@@ -3436,6 +3436,12 @@ const SCREEN_SLOTS = {
 // removes it, so it never reaches the server, and the preview shows what will be sent.
 const SCREEN_CUT_TOP = 0.33;
 const SCREEN_MAX_EDGE = 1568;
+// The Tax overview put under another label is sent uncut, tax ID and all (25.11.2026: it was,
+// under "Its Tax screen"). So each image is compared here, in the browser, with the Tax overview
+// of this sale and with the last one that was read. Only a 24 × 48 grey blur of its lower part
+// is remembered, too small to read. The bottom is left out: many screens share black buttons there.
+const SCREEN_SIG = { w: 24, h: 48, from: 0.42, to: 0.85, key: "taxOverviewSig" };
+const SCREEN_SAME = 0.6; // measured 25.11: the same screen with other amounts 0,87, other screens at most 0,16
 const screenState = {};
 let sellBefore = { cash: null, tax: null };
 
@@ -3469,25 +3475,26 @@ function renderReadButton(panelId) {
   // A plain button with the check as its own line: worded as a question, the button was missed.
   box.innerHTML =
     (cutAdded ? `<div class="subtitle">Check your tax ID isn't showing in the Tax overview above.</div>` : "") +
-    `<button onclick="readScreens('${panelId}')">Read the screens</button>`;
+    `<button onclick="readScreens('${panelId}')">Send to Anthropic and read</button>`;
 }
 
 function mountScreens(panelId, kind, onRead) {
-  screenState[panelId] = { kind, blobs: {}, taken: {}, read: null, onRead, readToken: 0 };
+  screenState[panelId] = { kind, blobs: {}, taken: {}, sigs: {}, allowed: {}, read: null, onRead, readToken: 0 };
   const intro = screensReadThemselves(kind)
-    ? "Add these screens from Trade Republic. They're read as soon as all of them are in."
-    : "Add these screens from Trade Republic, then press Read.";
+    ? "Add these screens from Trade Republic. As soon as all of them are in, they're <strong>sent to Anthropic</strong>, where Claude reads the numbers."
+    : "Add these screens from Trade Republic. The button <strong>sends them to Anthropic</strong>, where Claude reads the numbers.";
   const slots = SCREEN_SLOTS[kind]
     .map(
       (s) => `<div class="screen-slot">
         <label>${escapeHtml(s.label)}</label>
         <input type="file" accept="image/*" onchange="pickScreen('${panelId}', '${s.key}', this)" />
+        <div id="${panelId}-${s.key}-guard"></div>
         <div id="${panelId}-${s.key}-note"></div>
       </div>`
     )
     .join("");
   document.getElementById(panelId).innerHTML = `<div class="screen-panel">
-    <p class="subtitle">${intro} Nothing is saved until you confirm. The screens go to Anthropic to be read, and aren't kept.</p>
+    <p class="subtitle">${intro} The tool saves nothing until you confirm, and doesn't keep the images.</p>
     <div class="screen-slots">${slots}</div>
     <div id="${panelId}-read"></div>
     <div id="${panelId}-status"></div>
@@ -3498,7 +3505,18 @@ function mountScreens(panelId, kind, onRead) {
 function afterScreenChange(panelId) {
   const state = screenState[panelId];
   renderReadButton(panelId);
-  if (!screensReadThemselves(state.kind)) return;
+  const stopped = guardScreens(panelId);
+  if (stopped.length) {
+    // Also cancels a read still running for the set as it was before this change.
+    state.readToken++;
+    document.getElementById(`${panelId}-status`).innerHTML = GUARD_STATUS;
+    return;
+  }
+  if (!screensReadThemselves(state.kind)) {
+    const status = document.getElementById(`${panelId}-status`);
+    if (status.innerHTML === GUARD_STATUS) status.innerHTML = "";
+    return;
+  }
   const missing = SCREEN_SLOTS[state.kind].filter((s) => !state.blobs[s.key]).map((s) => s.label);
   if (!missing.length) {
     readScreens(panelId);
@@ -3511,18 +3529,92 @@ function afterScreenChange(panelId) {
     : "";
 }
 
+const GUARD_STATUS = `<div class="sell-warn">Nothing was sent. Check the screen marked ⚠ above first.</div>`;
+
+function storedTaxSig() {
+  try {
+    const sig = JSON.parse(localStorage.getItem(SCREEN_SIG.key));
+    return Array.isArray(sig) && sig.length === SCREEN_SIG.w * SCREEN_SIG.h ? sig : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function rememberTaxSig(state) {
+  const overview = state.read && state.read.tax_overview;
+  if (!state.sigs.tax_overview || !overview || !has(overview.pot_stocks)) return;
+  try {
+    localStorage.setItem(SCREEN_SIG.key, JSON.stringify(state.sigs.tax_overview));
+  } catch (e) {
+    // Only this session's comparison works then.
+  }
+}
+
+// The lower part of the screen as a tiny grey picture, used to tell one kind of screen from another.
+function screenSig(bitmap) {
+  const canvas = document.createElement("canvas");
+  canvas.width = SCREEN_SIG.w;
+  canvas.height = SCREEN_SIG.h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingQuality = "high";
+  const top = bitmap.height * SCREEN_SIG.from;
+  ctx.drawImage(bitmap, 0, top, bitmap.width, bitmap.height * SCREEN_SIG.to - top, 0, 0, SCREEN_SIG.w, SCREEN_SIG.h);
+  const d = ctx.getImageData(0, 0, SCREEN_SIG.w, SCREEN_SIG.h).data;
+  const out = [];
+  for (let i = 0; i < d.length; i += 4) out.push(Math.round((d[i] + d[i + 1] + d[i + 2]) / 3));
+  return out;
+}
+
+function sigMatch(a, b) {
+  const mean = (x) => x.reduce((t, v) => t + v, 0) / x.length;
+  const ma = mean(a);
+  const mb = mean(b);
+  let ab = 0, aa = 0, bb = 0;
+  a.forEach((v, i) => {
+    ab += (v - ma) * (b[i] - mb);
+    aa += (v - ma) ** 2;
+    bb += (b[i] - mb) ** 2;
+  });
+  return aa && bb ? ab / Math.sqrt(aa * bb) : 0;
+}
+
+// Which images look like the Tax overview under a label that isn't cut. Runs before every send.
+function guardScreens(panelId) {
+  const state = screenState[panelId];
+  const known = [state.sigs.tax_overview, storedTaxSig()].filter(Boolean);
+  const hasOwnPlace = SCREEN_SLOTS[state.kind].some((s) => s.cut);
+  return SCREEN_SLOTS[state.kind].filter((s) => {
+    const sig = state.sigs[s.key];
+    const stop = !s.cut && sig && !state.allowed[s.key] && known.some((k) => sigMatch(sig, k) >= SCREEN_SAME);
+    document.getElementById(`${panelId}-${s.key}-guard`).innerHTML = stop
+      ? `<div class="sell-warn">⚠ This looks like your Tax overview, which shows your tax ID. Choose ${
+          hasOwnPlace ? "the right screen here; the overview goes last" : "another screen"
+        }. <button class="secondary" onclick="allowScreen('${panelId}', '${s.key}')">It's a different screen</button></div>`
+      : "";
+    return stop;
+  });
+}
+
+function allowScreen(panelId, key) {
+  screenState[panelId].allowed[key] = true;
+  afterScreenChange(panelId);
+}
+
 async function pickScreen(panelId, key, input) {
   const state = screenState[panelId];
   const slot = SCREEN_SLOTS[state.kind].find((s) => s.key === key);
   const note = document.getElementById(`${panelId}-${key}-note`);
   delete state.blobs[key];
   delete state.taken[key];
+  delete state.sigs[key];
+  delete state.allowed[key];
   note.innerHTML = "";
   const file = input.files[0];
   if (file) {
     try {
-      const blob = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
+      const { blob, sig } = await prepareScreen(file, slot.cut ? SCREEN_CUT_TOP : 0);
       state.blobs[key] = blob;
+      state.sigs[key] = sig;
       // The file keeps the moment the screenshot was taken, so a screen saying "Today" and
       // uploaded the next morning is dated the day it was taken (TTWO, 13.11). Local date parts.
       if (file.lastModified) {
@@ -3549,9 +3641,10 @@ async function prepareScreen(file, cutTop) {
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(height * scale);
   canvas.getContext("2d").drawImage(bitmap, 0, top, bitmap.width, height, 0, 0, canvas.width, canvas.height);
+  const sig = screenSig(bitmap);
   bitmap.close();
   return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no image"))), "image/jpeg", 0.92)
+    canvas.toBlob((b) => (b ? resolve({ blob: b, sig }) : reject(new Error("no image"))), "image/jpeg", 0.92)
   );
 }
 
@@ -3563,10 +3656,14 @@ async function readScreens(panelId) {
     status.innerHTML = `<div class="sell-warn">Add at least one screen first.</div>`;
     return;
   }
+  if (guardScreens(panelId).length) {
+    status.innerHTML = GUARD_STATUS;
+    return;
+  }
   const form = new FormData();
   keys.forEach((k) => form.append(k, state.blobs[k], `${k}.jpg`));
   form.append("taken", JSON.stringify(state.taken));
-  status.innerHTML = `<div class="subtitle">Reading…</div>`;
+  status.innerHTML = `<div class="subtitle">Sending to Anthropic and reading…</div>`;
   // A slower reply for screens since replaced, or for a window since reopened, must not fill the form.
   const token = ++state.readToken;
   const stale = () => screenState[panelId] !== state || token !== state.readToken;
@@ -3585,6 +3682,7 @@ async function readScreens(panelId) {
       return;
     }
     state.read = body;
+    rememberTaxSig(state);
     const missing = SCREEN_SLOTS[state.kind].filter((s) => !state.blobs[s.key]).map((s) => s.label);
     status.innerHTML =
       `<div class="subtitle">Read. Check the numbers below before you confirm.</div>` +
