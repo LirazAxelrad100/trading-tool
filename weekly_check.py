@@ -47,6 +47,13 @@ GROWTH_LINE = 0.25  # her line (24.11): next year growing less than 25% on this 
 DOWN_DAYS = 5  # her line (24.11): five falling closes in a row
 SCORE_DROP = 0.05  # Opportunities B composite runs 0-1; smaller moves are one analyst
 STALE_DAYS = 8  # an export older than this is called out
+# Her market cue (26.11.2026): money parked in a calm ETF "until the market settles" moves
+# once the S&P 500 has closed above its 50-day average for two weeks in a row. One close
+# above was a poor signal: it crossed 23 times in the year to November, and the two
+# November climbs above failed within days. Read from an S&P 500 fund's EUR closes on
+# Lang & Schwarz (free, no cap); the euro rate leaks in a little, which is her money's view.
+MARKET_ISIN = "IE00B5BMR087"  # iShares Core S&P 500 UCITS ETF (Acc)
+MARKET_CUE_DAYS = 10
 
 
 # ---------- estimate history ----------
@@ -156,6 +163,38 @@ def _price_trend(closes: dict) -> Optional[dict]:
     return {"vs_avg": c[-1] / avg_now - 1, "avg_falling": avg_now < avg_before, "four_weeks": c[-1] / c[-21] - 1}
 
 
+def market_cue(closes: dict) -> Optional[dict]:
+    """Where the S&P 500 stands against its 50-day average, and how many closes in a row it
+    has been on that side. `met` once it has been above for MARKET_CUE_DAYS."""
+    days = sorted(closes)
+    if len(days) < 51 + MARKET_CUE_DAYS:
+        return None
+    c = [closes[d] for d in days]
+    side = None
+    streak = 0
+    for i in range(len(c) - 1, 49, -1):
+        above = c[i] > sum(c[i - 49:i + 1]) / 50
+        if side is None:
+            side = above
+        if above != side:
+            break
+        streak += 1
+    avg = sum(c[-50:]) / 50
+    return {"above": side, "streak": streak, "vs_avg": c[-1] / avg - 1,
+            "met": bool(side and streak >= MARKET_CUE_DAYS), "as_of": days[-1]}
+
+
+def market_cue_text(cue: dict) -> str:
+    if cue["above"]:
+        if cue["met"]:
+            return (f"Market cue met: the S&P 500 has closed above its 50-day average for {cue['streak']} days "
+                    f"in a row ({_pct(cue['vs_avg'])}). That is your cue for moving the parked money.")
+        return (f"Market: the S&P 500 is above its 50-day average ({_pct(cue['vs_avg'])}), "
+                f"{cue['streak']} of {MARKET_CUE_DAYS} days in a row so far.")
+    return (f"Market: the S&P 500 is below its 50-day average ({_pct(cue['vs_avg'])}), "
+            f"for {cue['streak']} days. Your cue is {MARKET_CUE_DAYS} closes in a row above it.")
+
+
 def _down_streak(closes: dict) -> int:
     c = [closes[d] for d in sorted(closes)]
     n = 0
@@ -210,7 +249,8 @@ def _growth(point: dict) -> Optional[float]:
 
 def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optional[dict] = None,
           reports: Optional[dict] = None, bloc: Optional[dict] = None, review_pct: Optional[float] = None,
-          watch_closes: Optional[dict] = None, today: Optional[date] = None) -> dict:
+          watch_closes: Optional[dict] = None, market_closes: Optional[dict] = None,
+          today: Optional[date] = None) -> dict:
     """Subject, body, and the ranks and Opportunities B scores to remember for next week.
     `closes_for(holding)` returns {date: close}; `scores` is {ticker: composite} (computed by
     the caller, since it costs Finnhub calls)."""
@@ -357,6 +397,9 @@ def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optiona
                        if h["shares"] * h["current_price"] / total * 100 >= review_pct), key=lambda x: -x[1])
         if past:
             head.append(f"Past your {review_pct:g}% review line: " + " · ".join(f"{t} ({_pct(p, sign=False)})" for t, p in past) + ".")
+    cue = market_cue(market_closes or {})
+    if cue:
+        head.append(market_cue_text(cue))
     head.append("")
 
     body = head

@@ -231,7 +231,7 @@ def weekly_email(holdings: list) -> None:
         active, growth,
         lambda h: ls_tc.daily_closes(h["isin"]) if h.get("isin") else {}, state,
         scores=scores, reports=reports, bloc=bloc, review_pct=review_pct,
-        watch_closes=watch_closes,
+        watch_closes=watch_closes, market_closes=ls_tc.daily_closes(weekly_check.MARKET_ISIN),
     )
     if send_email_with_retry(report["subject"], report["body"]):
         weekly_check.mark_sent(report)
