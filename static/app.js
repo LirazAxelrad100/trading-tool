@@ -2905,7 +2905,7 @@ function watchRuleLine(row) {
   // and her #tags hold it. The one extra note is a stock moving with something she owns
   // outside that group: PBF with VLO is the DK situation again.
   if (row.bloc === "joins")
-    parts.push(`<span class="sig-mid" title="Its price has moved with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days, so on a bad day for ${escapeHtml(watchRules.bloc.tickers.join(" · "))} it would likely fall with them — whatever the company does.">moves with ${escapeHtml(watchRules.bloc.tickers.join(" · "))}</span>`);
+    parts.push(`<span class="sig-mid" title="Price link ${fmt(row.bloc_closest.correlation)} with ${escapeHtml(row.bloc_closest.ticker)} over ${row.bloc_days} days. ${escapeHtml(row.bloc_closest.ticker)} is in your biggest group (${escapeHtml(watchRules.bloc.tickers.join(" · "))}), so on a bad day for them it would likely fall too — whatever the company does.">moves with ${escapeHtml(row.bloc_closest.ticker)}, in your biggest group</span>`);
   else if (row.bloc === "moves_with") parts.push(`moves with ${escapeHtml(row.bloc_closest.ticker)}, which you own`);
   else if (row.bloc === "leans")
     parts.push(`<span title="Price link ${fmt(row.bloc_closest.correlation)} over ${row.bloc_days} days, just under the ${fmt(0.5)} bar. Not one position, but not independent either.">leans towards ${escapeHtml(row.bloc_closest.ticker)}, which you own</span>`);

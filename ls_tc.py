@@ -66,7 +66,9 @@ def resolve_instrument_id(isin: str) -> int:
         raise LsTcError(f"ls-tc.de search failed for {isin}: {e}")
 
     match = next(
-        (r for r in results if r.get("isin") == isin and r.get("categorySymbol") == "STK"),
+        # ETFs are listed as "ETF", not "STK". The ISIN match is exact, so allowing both is
+        # safe, and the watch list's market adjustment reads an S&P 500 ETF in EUR this way.
+        (r for r in results if r.get("isin") == isin and r.get("categorySymbol") in ("STK", "ETF")),
         None,
     )
     if not match:

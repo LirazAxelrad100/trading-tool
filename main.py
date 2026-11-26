@@ -932,6 +932,31 @@ def list_watchlist():
 # Fewer shared days than this and a correlation is mostly noise — the bar the rules panel
 # needs before it says "joins your bloc", since that line reads as "against your rule".
 MIN_RULE_DAYS = 20
+RULE_LINK_WINDOW = 90        # trading days, the same window as "Move together"
+RULE_LINK_MIN_WEIGHT = 0.01  # holdings under 1% of active money are left out
+
+
+def rule_links(candidate: dict, holding_closes: dict) -> dict:
+    """Raw daily-return correlation of a candidate's closes with each holding's L&S closes,
+    over the last RULE_LINK_WINDOW shared weekdays. Raw, like the groups in Move together
+    and the 0,5 bar they use: a market adjustment needs a market series in EUR, and even
+    then it pushed two calm stocks together simply for both falling less than the market
+    (CAH and LLY 0,20 → 0,41). {"days": n, "pairs": [...]} sorted closest first, or {}."""
+    dates = sorted(candidate)[-(RULE_LINK_WINDOW + 1):]
+    pairs, days = [], 0
+    for other, closes in holding_closes.items():
+        shared = [d for d in dates if d in closes]
+        if len(shared) <= MIN_RULE_DAYS:
+            continue
+        a = [candidate[shared[k]] / candidate[shared[k - 1]] - 1 for k in range(1, len(shared))]
+        b = [closes[shared[k]] / closes[shared[k - 1]] - 1 for k in range(1, len(shared))]
+        corr = concentration._correlation(a, b)
+        if corr is None:
+            continue
+        pairs.append({"ticker": other, "correlation": corr})
+        days = max(days, len(a))
+    pairs.sort(key=lambda p: -p["correlation"])
+    return {"days": days, "pairs": pairs} if pairs else {}
 
 
 @app.get("/api/watchlist/rules")
@@ -958,10 +983,17 @@ def watchlist_against_rules():
         cash_eur = 0.0
     money_total = active_total + cash_eur
     history, sales = load_holdings_history(), load_sales_history()
-    watch_history = load_watchlist_history()
 
     base = concentration.analyze(active, history, sales)
     bloc = base["groups"][0] if not base.get("error") and base.get("groups") else None
+    # Each holding's own L&S closes, for the "moves with" line. A leftover fraction (VLO's
+    # after a stop sold the whole shares) is not something she owns in any sense that matters.
+    holding_closes = {
+        h["ticker"]: ls_closes_for(h["ticker"])
+        for h in active
+        if h.get("isin") and active_total
+        and h["shares"] * h["current_price"] / active_total >= RULE_LINK_MIN_WEIGHT
+    }
 
     rows = []
     for it in load_watchlist():
@@ -986,30 +1018,20 @@ def watchlist_against_rules():
         # Run even with no bloc: "does it move with something I own?" still has an answer
         # when her holdings move independently of each other. Gating it on a bloc made every
         # row read "not enough data" the day the last bloc dissolved (19.11.2026).
-        # Both series are tried and the longer comparison kept. The recorded one is only
-        # ~12 days for most tickers, and on those it put a pharma supplier (WST) and an
-        # oilfield-equipment maker (FET) in the AI bloc; the cached closes, a month or more,
-        # put PBF with VLO and DK and SKHY with MU instead — what they actually are.
-        cached = [{"date": d, "ticker": ticker, "price": p}
-                  for d, p in alpha_vantage.cached_closes(ticker).items()]
-        # L&S closes are EUR, like the recorded holding values, so no currency leaks in.
-        ls_series = [{"date": d, "ticker": ticker, "price": p} for d, p in ls_closes.items()]
-        best = {}
-        for series in (ls_series, cached, watch_history):
-            try:
-                cmp = concentration.compare_candidate(
-                    ticker, active, history, sales, watchlist_history=series, cached_only=True,
-                )
-            except AlphaVantageError:
-                continue
-            if cmp.get("pairs") and (cmp.get("days") or 0) > (best.get("days") or 0):
-                best = cmp
+        # Closes against closes (2026-11-26, rule_links()): comparing a candidate's L&S closes
+        # with the holdings' *recorded values* lined up mismatched days, since a value is
+        # recorded at 08:00 from the previous evening's close. CAH read 0,84 with BLCO and APH
+        # "on its own", when on closes CAH is ~0,2 with anything and APH 0,61 with NVDA.
+        candidate = ls_closes or alpha_vantage.cached_closes(ticker)
+        best = rule_links(candidate, holding_closes)
         if (best.get("days") or 0) >= MIN_RULE_DAYS:
             top = best["pairs"][0]
             row["bloc_closest"] = top
             row["bloc_days"] = best["days"]
+            linked = {p["ticker"] for p in best["pairs"]
+                      if p["correlation"] >= concentration.CORRELATION_THRESHOLD}
             row["bloc"] = (
-                "joins" if bloc and best.get("joins_group") == bloc["tickers"]
+                "joins" if bloc and linked & set(bloc["tickers"])
                 else "moves_with" if top["correlation"] >= concentration.CORRELATION_THRESHOLD
                 else "leans" if top["correlation"] >= 0.35
                 else "own"
