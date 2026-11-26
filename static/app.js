@@ -2589,7 +2589,7 @@ function renderWatchlist() {
     const scoreText = w.score ? Math.round(w.score.composite * 100) : "—";
     tr.innerHTML = `
       <td>
-        <span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span>${watchAiTag(w.ai_business)}
+        <span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span>${watchAiTag(w.ai_business, w.ticker)}
         ${
           w.source_url
             ? `<a class="source-link" href="${escapeHtml(w.source_url)}" target="_blank" rel="noopener noreferrer" title="Open the source you added this from">↗</a>`
@@ -3218,11 +3218,19 @@ function aiBusinessCell(a) {
 // The watch list's version: a small tag beside the ticker, only where it says something.
 // "AI" when her rule counts it, "AI?" when nobody has read the company's reports yet, and
 // nothing for a company checked and found not AI — a "No" on every row would be noise.
-function watchAiTag(a) {
+// "AI(!)" is her third kind (26.11.2026): not AI by its business, but its price moves with her
+// AI holdings, so a bad AI day would likely pull it down too. Allowed by her rule, flagged so
+// she notes it and weighs the size. Needs the rules reading, so it appears once that loads.
+function watchAiTag(a, ticker) {
   if (!a) return ` <span class="ai-tag unchecked" title="Not checked yet: is more than half of its sales from AI?">AI?</span>`;
-  if (!a.ai) return "";
-  const title = `${a.note} Checked ${a.checked.split("-").reverse().join(".")}.`;
-  return ` <span class="ai-tag" title="${escapeHtml(title)}">AI</span>`;
+  const checked = `Checked ${a.checked.split("-").reverse().join(".")}.`;
+  if (a.ai) return ` <span class="ai-tag" title="${escapeHtml(`${a.note} ${checked}`)}">AI</span>`;
+  const rule = watchRules && watchRules.rows.find((x) => x.ticker === ticker);
+  const links = (rule && rule.ai_links) || [];
+  if (!links.length) return "";
+  const withWhat = links.map((p) => `${p.ticker} (${fmt(p.correlation)})`).join(", ");
+  const title = `AI-linked: its business is not AI (${a.note}), but its price moves with your AI stocks: ${withWhat}, over ${rule.bloc_days} days. On a bad AI day it would likely fall too. Allowed by your rule: note it and think about the size.`;
+  return ` <span class="ai-tag linked" title="${escapeHtml(title)}">AI(!)</span>`;
 }
 
 function renderOpportunitiesB() {

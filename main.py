@@ -1010,6 +1010,12 @@ def watchlist_against_rules():
         and h["shares"] * h["current_price"] / active_total >= RULE_LINK_MIN_WEIGHT
     }
 
+    # Her AI holdings, by the same reading as the watch list's AI tag. A stock that is not AI
+    # by its business but moves with these is "AI-linked" (her rule, 26.11.2026): allowed, but
+    # flagged, so she notes it and weighs the size.
+    ai_reading = json.loads(AI_BUSINESS_FILE.read_text()) if AI_BUSINESS_FILE.exists() else {}
+    ai_holdings = {t for t in holding_closes if (ai_reading.get(t) or {}).get("ai")}
+
     rows = []
     for it in load_watchlist():
         ticker = it["ticker"]
@@ -1045,6 +1051,9 @@ def watchlist_against_rules():
             row["bloc_days"] = best["days"]
             linked = {p["ticker"] for p in best["pairs"]
                       if p["correlation"] >= concentration.CORRELATION_THRESHOLD}
+            row["ai_links"] = [p for p in best["pairs"]
+                               if p["ticker"] in ai_holdings
+                               and p["correlation"] >= concentration.CORRELATION_THRESHOLD]
             row["bloc"] = (
                 "joins" if bloc and linked & set(bloc["tickers"])
                 else "moves_with" if top["correlation"] >= concentration.CORRELATION_THRESHOLD
@@ -1063,7 +1072,8 @@ def watchlist_against_rules():
     ]
     review.sort(key=lambda r: -r["pct"])
     return {"rules": rules, "active_total": active_total, "cash": cash_eur, "money_total": money_total,
-            "bloc": bloc, "rows": rows, "review": review, "min_days": MIN_RULE_DAYS}
+            "bloc": bloc, "rows": rows, "review": review, "min_days": MIN_RULE_DAYS,
+            "ai_holdings": sorted(ai_holdings)}
 
 
 @app.post("/api/watchlist")

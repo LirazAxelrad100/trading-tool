@@ -429,3 +429,4 @@ tr.watch-rule-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted);
    signals; unchecked is muted so a missing reading never looks like a verdict. */
 .ai-tag { color: var(--amber); font-size: 0.72rem; font-weight: 600; margin-left: 0.3rem; cursor: help; }
 .ai-tag.unchecked { color: var(--muted); font-weight: 400; }
+.ai-tag.linked { font-weight: 400; }
