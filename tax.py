@@ -16,9 +16,9 @@ every realised loss as if it were worth nothing.
 Scope and limits, all deliberate:
 
 - **Share losses only offset share gains.** That is the German rule for `Aktien` (a separate
-  pot from other investment income), and every instrument in this tool is a share, so the
-  simple version is the correct one here. It would stop being correct the day a bond, fund or
-  derivative is recorded.
+  pot from other investment income). Equity ETFs (`kind: "fund"`) are handled since
+  26.11.2026: 30% of their gain is tax-free, and their result goes into the general pot (see
+  EQUITY_FUND_EXEMPTION). Bonds and derivatives are still not modelled.
 - **The Sparerpauschbetrag** (€1.000 a year) is applied to a positive net. It is shared across
   every account the user holds, so the tool can only assume the whole allowance is available
   here — stated in the UI rather than hidden.
@@ -45,15 +45,38 @@ def _year(sale: dict) -> Optional[str]:
     return stamp[:4] or None
 
 
+# Equity ETFs (funds holding at least 51% shares) are taxed as funds, not shares (InvStG,
+# from 2018): 30% of a gain is tax-free (Teilfreistellung), and only 70% of a loss counts.
+# Their result goes into the general pot, not the share pot. So a fund loss can offset
+# share profit, but a share loss cannot offset fund profit. Added 26.11.2026, before her
+# first ETF. Not modelled: the yearly Vorabpauschale on accumulating funds (small, and
+# taken at the start of the year, not on a sale).
+EQUITY_FUND_EXEMPTION = 0.30
+
+
+def is_fund(sale: dict) -> bool:
+    return sale.get("kind") == "fund"
+
+
 def year_summary(sales: list, year: str, carried_in: float = 0.0,
-                 allowance: float = ANNUAL_ALLOWANCE_EUR) -> dict:
+                 allowance: float = ANNUAL_ALLOWANCE_EUR, general_carried_in: float = 0.0) -> dict:
     """Realised gains, realised losses and what is actually owed for one calendar year.
     `allowance` is what is available against these sales — the whole Sparerpauschbetrag by
-    default, or only what is left at one bank when computing that bank on its own."""
+    default, or only what is left at one bank when computing that bank on its own.
+    `carried_in` is the share-loss pot; `general_carried_in` the other pot, which may offset
+    anything, share profit included."""
     rows = [s for s in sales or [] if _year(s) == str(year)]
     gains = sum(s["realized_gain"] for s in rows if (s.get("realized_gain") or 0) > 0)
     losses = sum(s["realized_gain"] for s in rows if (s.get("realized_gain") or 0) < 0)
-    net = gains + losses - carried_in
+    share_net = sum(s.get("realized_gain") or 0 for s in rows if not is_fund(s)) - carried_in
+    fund_net = (sum(s.get("realized_gain") or 0 for s in rows if is_fund(s))
+                * (1 - EQUITY_FUND_EXEMPTION) - general_carried_in)
+    # A share loss stays in the share pot; everything else meets in the general one.
+    share_carry = max(0.0, -share_net)
+    combined = max(0.0, share_net) + fund_net
+    general_carry = max(0.0, -combined)
+    # Without funds this is exactly the old single-pot figure: shares minus both pots.
+    net = combined if combined > 0 else -(share_carry + general_carry)
 
     taxable = max(0.0, net - allowance)
     allowance_used = min(max(net, 0.0), allowance)
@@ -69,8 +92,10 @@ def year_summary(sales: list, year: str, carried_in: float = 0.0,
         "allowance_used": allowance_used,
         # A negative net is not "no tax and nothing else" — it is a balance that reduces next
         # year's bill, which is the part the per-row column threw away.
-        "carry_forward": abs(net) if net < 0 else 0.0,
-        "carried_in": carried_in,
+        "carry_forward": share_carry + general_carry,
+        "share_carry_forward": share_carry,
+        "general_carry_forward": general_carry,
+        "carried_in": carried_in + general_carried_in,
     }
 
 
@@ -124,10 +149,9 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
         # A full timestamp sorts after its own bare date, so this keeps same-day sales.
         if as_of:
             rows = [s for s in rows if (s.get("sell_datetime") or s.get("sell_date") or "") > as_of]
-    # Every sale here is a share, so the order the two pots are used in cannot change the
-    # total: a share profit meets the share pot first and the other pot after it.
+    # The other pot is kept apart from the share pot: it can offset share profit, but a
+    # fund's profit (an ETF) only meets this one, never the share pot (year_summary()).
     other_pot = float(settings.get("other_loss_pot") or 0)
-    carried_in += other_pot
     if "allowance_left" in settings:
         allowance = float(settings["allowance_left"] or 0)
     else:
@@ -137,7 +161,8 @@ def bank_summary(sales: list, year: str, broker: str, settings: Optional[dict] =
     divs = settings.get("dividends")
     if divs:
         allowance = max(0.0, allowance - divs["paid_eur"])
-    summary = year_summary(rows, year, carried_in=carried_in, allowance=allowance)
+    summary = year_summary(rows, year, carried_in=carried_in, allowance=allowance,
+                           general_carried_in=other_pot)
     summary.update({"broker": broker, "pot_as_of": as_of if pot is not None else None,
                     "pot_from": "bank" if pot is not None else "records",
                     "share_pot": float(pot) if pot is not None else None, "other_pot": other_pot,
@@ -167,7 +192,7 @@ def by_bank(sales: list, year: str, settings: dict, brokers: list) -> dict:
 
 
 def tax_on_next_gain(sales: list, year: str, gain: float, broker: Optional[str] = None,
-                     settings: Optional[dict] = None) -> dict:
+                     settings: Optional[dict] = None, kind: Optional[str] = None) -> dict:
     """What one more sale would actually add to the year's tax — the question the sell
     preview is really asking. It used to answer `max(0, gain) * rate`, which ignores every
     loss already banked: when realised losses in the pot exceed the gain being considered,
@@ -180,7 +205,7 @@ def tax_on_next_gain(sales: list, year: str, gain: float, broker: Optional[str] 
         bank_settings = (settings or {}).get(broker)
         any_settings = bool(settings)
         before = bank_summary(sales, year, broker, bank_settings, any_settings)
-        extra = {"sell_datetime": f"{year}-12-31", "realized_gain": gain, "broker": broker}
+        extra = {"sell_datetime": f"{year}-12-31", "realized_gain": gain, "broker": broker, "kind": kind}
         after = bank_summary(sales + [extra], year, broker, bank_settings, any_settings)
         return {
             "tax_before": before["estimated_tax"],
@@ -191,7 +216,7 @@ def tax_on_next_gain(sales: list, year: str, gain: float, broker: Optional[str] 
             "allowance": before["allowance"] - before["allowance_used"],
         }
     before = year_summary(sales, year)
-    after = year_summary(sales + [{"sell_datetime": f"{year}-01-01", "realized_gain": gain}], year)
+    after = year_summary(sales + [{"sell_datetime": f"{year}-01-01", "realized_gain": gain, "kind": kind}], year)
     return {
         "tax_before": before["estimated_tax"],
         "tax_after": after["estimated_tax"],

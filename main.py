@@ -464,6 +464,10 @@ def create_holding(holding: HoldingIn):
         new_holding["stop_price"] = None
     if holding.cost_note:
         new_holding["cost_note"] = holding.cost_note.strip()
+    # An ETF is taxed as a fund (30% of a gain tax-free, its own loss pot), so the sale and
+    # the "if I sold this now" figures need to know. Read from how L&S lists the ISIN.
+    if new_holding["isin"] and ls_tc.is_etf(new_holding["isin"]):
+        new_holding["kind"] = "fund"
     recompute_aggregates(new_holding)
     holdings.append(new_holding)
     save_holdings(holdings)
@@ -534,6 +538,11 @@ def update_holding(holding_id: str, update: HoldingUpdate):
 
     if "isin" in changes and changes["isin"]:
         changes["isin"] = changes["isin"].strip().upper()
+        # An ISIN added later can turn out to be an ETF, which is taxed as a fund.
+        if ls_tc.is_etf(changes["isin"]):
+            changes["kind"] = "fund"
+        else:
+            holding.pop("kind", None)
 
     for key, value in changes.items():
         holding[key] = value
@@ -579,7 +588,7 @@ def sale_tax_preview(holding_id: str, shares: Optional[float] = None, total: Opt
     broker = h.get("broker") or tax.DEFAULT_BROKER
     t = tax.tax_on_next_gain(
         load_sales_history(), str(date.today().year), gain, broker=broker,
-        settings=tax_settings_with_dividends(broker, cached_only=True),
+        settings=tax_settings_with_dividends(broker, cached_only=True), kind=h.get("kind"),
     )
     return {
         "broker": broker,
@@ -681,6 +690,8 @@ def sell_holding(holding_id: str, sell: SellRequest):
         # Each bank nets its own losses at source, so the tax summary needs to know where.
         "broker": holding.get("broker") or tax.DEFAULT_BROKER,
     }
+    if holding.get("kind"):
+        entry["kind"] = holding["kind"]  # "fund": taxed as an ETF (tax.EQUITY_FUND_EXEMPTION)
     if sell.broker_gain is not None:
         entry["broker_gain"] = sell.broker_gain
     if sell.tax_paid is not None:
@@ -1236,6 +1247,7 @@ def evaluate_trailing(holding: dict, current_price: float) -> dict:
         broker=holding.get("broker") or tax.DEFAULT_BROKER,
         # Cached only: this runs per holding on every refresh and must not spend Alpha Vantage calls.
         settings=tax_settings_with_dividends(holding.get("broker") or tax.DEFAULT_BROKER, cached_only=True),
+        kind=holding.get("kind"),
     )["extra_tax"]
 
     pct_move = (current_price - reference_high) / reference_high

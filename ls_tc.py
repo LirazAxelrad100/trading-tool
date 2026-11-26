@@ -75,9 +75,31 @@ def resolve_instrument_id(isin: str) -> int:
         raise LsTcError(f"No ls-tc.de stock instrument found for ISIN {isin}")
 
     instrument_id = match["instrumentId"]
-    cache[isin] = {"instrument_id": instrument_id, "displayname": match.get("displayname")}
+    cache[isin] = {"instrument_id": instrument_id, "displayname": match.get("displayname"),
+                   "category": match.get("categorySymbol")}
     _save_cache(cache)
     return instrument_id
+
+
+def is_etf(isin: str) -> bool:
+    """True when Lang & Schwarz lists this ISIN as an ETF. Decides how a new holding is taxed
+    (tax.EQUITY_FUND_EXEMPTION). Entries cached before the category was kept are looked up
+    again once; any failure answers False, the share treatment the tool always had."""
+    isin = (isin or "").strip().upper()
+    if not isin:
+        return False
+    entry = _load_cache().get(isin)
+    if entry and "category" in entry:
+        return entry["category"] == "ETF"
+    if entry:
+        cache = _load_cache()
+        cache.pop(isin, None)
+        _save_cache(cache)
+    try:
+        resolve_instrument_id(isin)
+    except LsTcError:
+        return False
+    return (_load_cache().get(isin) or {}).get("category") == "ETF"
 
 
 def fetch_price(isin: str) -> dict:
