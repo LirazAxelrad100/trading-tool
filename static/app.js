@@ -2589,7 +2589,7 @@ function renderWatchlist() {
     const scoreText = w.score ? Math.round(w.score.composite * 100) : "—";
     tr.innerHTML = `
       <td>
-        <span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span>
+        <span class="ticker-name" onclick="showWatchConsensus('${w.id}')">${w.ticker}</span>${watchAiTag(w.ai_business)}
         ${
           w.source_url
             ? `<a class="source-link" href="${escapeHtml(w.source_url)}" target="_blank" rel="noopener noreferrer" title="Open the source you added this from">↗</a>`
@@ -3213,6 +3213,16 @@ function aiBusinessCell(a) {
   if (!a) return `<span class="subtitle" title="Not checked yet">?</span>`;
   const title = `${a.note} Checked ${a.checked.split("-").reverse().join(".")}.`;
   return `<span title="${escapeHtml(title)}">${a.ai ? "<strong>Yes</strong>" : "No"}</span>`;
+}
+
+// The watch list's version: a small tag beside the ticker, only where it says something.
+// "AI" when her rule counts it, "AI?" when nobody has read the company's reports yet, and
+// nothing for a company checked and found not AI — a "No" on every row would be noise.
+function watchAiTag(a) {
+  if (!a) return ` <span class="ai-tag unchecked" title="Not checked yet: is more than half of its sales from AI?">AI?</span>`;
+  if (!a.ai) return "";
+  const title = `${a.note} Checked ${a.checked.split("-").reverse().join(".")}.`;
+  return ` <span class="ai-tag" title="${escapeHtml(title)}">AI</span>`;
 }
 
 function renderOpportunitiesB() {

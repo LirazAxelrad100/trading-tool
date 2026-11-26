@@ -920,12 +920,16 @@ def fetch_watch_data(ticker: str, rate: float) -> dict:
 @app.get("/api/watchlist")
 def list_watchlist():
     items = load_watchlist()
+    # Her AI-or-not reading (more than half of sales from AI, data centres included), read
+    # by hand per ticker, same file as Opportunities B's AI column.
+    ai = json.loads(AI_BUSINESS_FILE.read_text()) if AI_BUSINESS_FILE.exists() else {}
     for it in items:
         it.update(consensus_store.overlay_consensus(it["ticker"]))
         # Forward estimates come from a hand-exported Zacks Growth CSV rather than from
         # the per-ticker refresh, so they are overlaid at read time like the consensus —
         # a newly imported export shows up immediately, without re-refreshing every row.
         it.update(zacks_import.overlay_growth(it["ticker"]))
+        it["ai_business"] = ai.get(it["ticker"])
     return items
 
 

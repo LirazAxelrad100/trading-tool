@@ -424,3 +424,8 @@ tr.watch-rule-line td { padding-top: 0; font-size: 0.85rem; color: var(--muted);
    for Since purchase. Real buttons: as plain links they didn't read as clickable. */
 .row-links { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; white-space: nowrap; }
 .row-links button { padding: 0.2rem 0.5rem; font-size: 0.8rem; margin: 0; }
+
+/* Watch list: her AI rule beside the ticker (watchAiTag). Amber like the other "worth a look"
+   signals; unchecked is muted so a missing reading never looks like a verdict. */
+.ai-tag { color: var(--amber); font-size: 0.72rem; font-weight: 600; margin-left: 0.3rem; cursor: help; }
+.ai-tag.unchecked { color: var(--muted); font-weight: 400; }
