@@ -47,6 +47,8 @@ GROWTH_LINE = 0.25  # her line (24.11): next year growing less than 25% on this 
 DOWN_DAYS = 5  # her line (24.11): five falling closes in a row
 SCORE_DROP = 0.05  # Opportunities B composite runs 0-1; smaller moves are one analyst
 STALE_DAYS = 8  # an export older than this is called out
+LAG_LINE = 0.10  # her rule 4 (28.11): 10+ points behind the S&P 500 fund over 12 months
+LAG_MIN_DAYS = 90  # a shorter window (recent purchase) says too little
 # Her market cue (26.11.2026): money parked in a calm ETF "until the market settles" moves
 # once the S&P 500 has closed above its 50-day average for two weeks in a row. One close
 # above was a poor signal: it crossed 23 times in the year to November, and the two
@@ -241,6 +243,35 @@ def w_text(w: dict) -> str:
             f"(the depth of the W added above the middle peak; a rule of thumb, not a forecast).")
 
 
+def _close_on(closes: dict, day: str) -> Optional[tuple]:
+    """The last close on or before `day`, within a week of it (else the series is too short)."""
+    before = [d for d in closes if d <= day]
+    if not before:
+        return None
+    d = max(before)
+    return (d, closes[d]) if (date.fromisoformat(day) - date.fromisoformat(d)).days <= 7 else None
+
+
+def market_lag(closes: dict, market: dict, bought: str) -> Optional[dict]:
+    """Her rule 4 (28.11.2026): a stock 10+ points behind an S&P 500 fund over 12 months gets
+    a review. The window starts at her purchase when that is later, since a lag from before
+    she bought was known when she bought; under LAG_MIN_DAYS of window, no reading."""
+    if not closes or not market:
+        return None
+    last = max(closes)
+    start = (date.fromisoformat(last) - timedelta(days=365)).isoformat()
+    since_buy = bool(bought) and bought > start
+    if since_buy:
+        start = bought
+    if (date.fromisoformat(last) - date.fromisoformat(start)).days < LAG_MIN_DAYS:
+        return None
+    a, m0, m1 = _close_on(closes, start), _close_on(market, start), _close_on(market, last)
+    if not (a and m0 and m1):
+        return None
+    stock, mkt = closes[last] / a[1] - 1, m1[1] / m0[1] - 1
+    return {"stock": stock, "market": mkt, "gap": stock - mkt, "since_buy": since_buy, "start": start}
+
+
 def _growth(point: dict) -> Optional[float]:
     if point and point.get("this") and point["this"] > 0 and point.get("next") is not None:
         return point["next"] / point["this"] - 1
@@ -357,6 +388,19 @@ def build(holdings: list, growth: dict, closes_for, state: dict, scores: Optiona
         trend = _price_trend(closes)
         if trend and trend["vs_avg"] < 0 and trend["avg_falling"]:
             lines.append(f"Falling: below its 50-day average, which is itself going down; {_pct(trend['four_weeks'])} in four weeks.")
+        # Rule 4: lagging the market. A review, not a sell: the profit line says which kind.
+        lag = market_lag(closes, market_closes or {}, (h.get("purchase_date") or "")[:10])
+        if lag and lag["gap"] <= -LAG_LINE:
+            when = f"since you bought it ({_d(lag['start'])})" if lag["since_buy"] else "over 12 months"
+            gr = next_est / this_est - 1 if this_est and this_est > 0 and next_est is not None else None
+            if gr is None:
+                profit = "No profit estimate to compare."
+            elif gr > 0:
+                profit = f"Profit still expected to grow {_pct(gr)} next year, so it may just have got cheaper."
+            else:
+                profit = f"Profit not expected to grow next year ({_pct(gr)}), so it may have stopped working."
+            lines.append(f"Lagging the market {when}: {_pct(lag['stock'])} against {_pct(lag['market'])} "
+                         f"for the S&P 500 fund. Your rule 4: review. {profit}")
 
         # A report soon: time to write the decision question first.
         report = g.get("next_report_date")
